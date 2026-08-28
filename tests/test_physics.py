@@ -1,0 +1,187 @@
+"""The plant: does it track, stay finite, and hold a cube."""
+
+from typing import Any
+
+import numpy as np
+import pytest
+
+from specialist_sim import PickPlaceCfg, PickPlaceEnv
+from specialist_sim import pose as se3
+from specialist_sim.action import hold
+from specialist_sim.randomise import HOME_ROTATION
+from specialist_sim.spaces import (
+  ACTION_HIGH,
+  ACTION_LOW,
+  GRIPPERS,
+  HORIZON,
+  PER_HAND,
+  STATE_HIGH,
+  STATE_LOW,
+)
+from specialist_sim.task import TaskCfg
+
+APPROACH_OPENING = 0.4
+"""A finger opening that clears the cube."""
+
+
+def _command(env: PickPlaceEnv, pose: np.ndarray, seconds: float) -> dict[str, Any]:
+  """Ask for one pose across the whole trajectory, for as long as named."""
+  commanded = hold(pose)
+  for _ in range(round(seconds * env.cfg.control_hz)):
+    obs, _, _, _, _ = env.step(commanded)
+  return obs
+
+
+def test_the_hands_reach_a_commanded_pose() -> None:
+  env = PickPlaceEnv()
+  obs, _ = env.reset(seed=0)
+  action = obs["state"].astype(np.float64)
+  for at in (0, PER_HAND):
+    action[at] += 0.05
+    action[at + 2] -= 0.05
+  obs = _command(env, action, 1.0)
+  for at in (0, PER_HAND):
+    assert obs["state"][at : at + 3] == pytest.approx(action[at : at + 3], abs=1e-3)
+
+
+def test_random_commands_do_not_diverge() -> None:
+  """Every pose drawn independently, which slams the setpoint at the trajectory rate.
+
+  The setpoint cannot leave the box, so neither can the hand chasing it.
+  """
+  env = PickPlaceEnv()
+  env.reset(seed=1)
+  rng = np.random.default_rng(1)
+  for _ in range(100):
+    obs, *_ = env.step(rng.uniform(ACTION_LOW, ACTION_HIGH).astype(np.float64))
+    assert np.isfinite(env.scene.data.qpos).all()
+    assert np.isfinite(env.scene.data.qvel).all()
+    for hand in range(len(GRIPPERS)):
+      at = hand * PER_HAND
+      reached = obs["state"][at : at + 3]
+      assert (reached <= STATE_HIGH[at : at + 3] + 0.05).all()
+      assert (reached >= STATE_LOW[at : at + 3] - 0.05).all()
+
+
+@pytest.mark.parametrize("seed", [3, 1])
+def test_a_closed_hand_lifts_the_cube(seed: int) -> None:
+  """Whether the environment is solvable at all.
+
+  The command names the gripper's base, so reaching the cube means offsetting
+  by where the pads meet, turned into the room by the commanded rotation. The
+  nearer hand does the work; the far one cannot reach across the other.
+  """
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
+  obs, info = env.reset(seed=seed)
+  cube = np.asarray(info["cube_pos"], np.float64)
+  hand = _nearest_hand(env, cube)
+  action = obs["state"].astype(np.float64).copy()
+  at = hand * PER_HAND
+  held = HOME_ROTATION[hand]
+  action[at + 3 : at + 7] = se3.wxyz(held)
+  over = cube - held @ env.scene.grasp
+  for position, grip, seconds in (
+    (over + (0.0, 0.0, 0.10), APPROACH_OPENING, 0.9),
+    (over, APPROACH_OPENING, 1.2),
+    (over, 0.0, 1.0),
+    (over + (0.0, 0.0, 0.20), 0.0, 1.5),
+  ):
+    action[at : at + 3], action[at + 7] = position, grip
+    _command(env, action, seconds)
+  lifted = env.scene.data.xpos[env.scene.cube.body][2] - env.scene.cube.rest
+  assert lifted > 0.05, f"the cube only rose {lifted * 1000:.1f} mm"
+
+
+def _nearest_hand(env: PickPlaceEnv, cube: np.ndarray) -> int:
+  """Which hand the cube is closer to."""
+  reach = [
+    float(
+      np.linalg.norm(
+        env.scene.data.xpos[env.scene.model.body(f"{slot}_base").id] - cube
+      )
+    )
+    for slot in GRIPPERS
+  ]
+  return int(np.argmin(reach))
+
+
+def test_a_settled_cube_on_the_tape_pays_once() -> None:
+  """The reward marks the step the episode latches, and nothing after it."""
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
+  obs, _ = env.reset(seed=0, options={"cube": env.scene.tape})
+  action = obs["state"].astype(np.float64)
+  rewards, terminations = [], []
+  for _ in range(TaskCfg().settle_steps + 3):
+    _, reward, terminated, _, info = env.step(hold(action))
+    rewards.append(reward)
+    terminations.append(terminated)
+  assert sum(rewards) == 1.0, f"the episode paid {sum(rewards)}"
+  assert rewards.index(1.0) == TaskCfg().settle_steps - 1, "the dwell is not the latch"
+  assert terminations[rewards.index(1.0) :] == [True] * (
+    len(rewards) - rewards.index(1.0)
+  )
+  assert info["is_success"]
+
+
+def test_a_cube_off_the_table_ends_the_episode() -> None:
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
+  obs, _ = env.reset(seed=0)
+  address = env.scene.cube.qpos
+  env.scene.data.qpos[address + 2] = env.scene.table_top - 0.5
+  _, reward, terminated, _, info = env.step(hold(obs["state"]))
+  assert info["dropped"] and terminated and reward == 0.0
+
+
+def test_the_hand_tracks_the_orientation_it_is_commanded() -> None:
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
+  obs, _ = env.reset(seed=0)
+  action = obs["state"].astype(np.float64)
+  turn = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+  wanted = turn @ HOME_ROTATION[0]
+  action[3:7] = se3.wxyz(wanted)
+  _command(env, action, 1.5)
+  reached = se3.rotation(env.step(hold(action))[0]["state"][3:7])
+  assert np.linalg.norm(se3.log(wanted @ reached.T)) < 1e-2
+
+
+def test_the_tracker_passes_through_every_pose_it_tracks() -> None:
+  """The setpoint reaches each tracked pose at the substep that carries it."""
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
+  obs, _ = env.reset(seed=0)
+  hands = env.hands
+  commanded = hold(obs["state"])
+  commanded[:, 2] += 0.02 * np.arange(1, HORIZON + 1)
+  hands.process(commanded, env.scene.data)
+  ramp = hands._ramp_position[:, 0, 2]
+  for leg in range(hands.tracked):
+    assert ramp[(leg + 1) * hands.span - 1] == pytest.approx(commanded[leg, 2])
+  assert (np.diff(ramp) > 0).all(), "the setpoint jumped rather than ramped"
+  assert abs(ramp[0] - obs["state"][2]) < abs(ramp[-1] - obs["state"][2]) / 10.0
+
+
+def test_a_plan_reaches_past_the_step_that_executes_it() -> None:
+  """The poses beyond the control step are commanded but never tracked."""
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
+  obs, _ = env.reset(seed=0)
+  assert 0 < env.hands.tracked < HORIZON
+  kept = hold(obs["state"])
+  discarded = kept.copy()
+  discarded[env.hands.tracked :, :3] += 0.3
+  env.step(kept)
+  followed = env.scene.data.qpos.copy()
+  env.reset(seed=0)
+  env.step(discarded)
+  assert env.scene.data.qpos == pytest.approx(followed)
+
+
+def test_a_plan_turns_inside_one_control_step() -> None:
+  """A trajectory resolves motion a single commanded pose could not express."""
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
+  obs, _ = env.reset(seed=0)
+  hands = env.hands
+  commanded = hold(obs["state"])
+  commanded[:, 2] += 0.05 * np.array([1.0, 2.0, 1.0, 0.0] * (HORIZON // 4))
+  hands.process(commanded, env.scene.data)
+  ramp = hands._ramp_position[:, 0, 2]
+  rising = np.diff(ramp) > 0
+  assert rising.any() and not rising.all(), "the setpoint only went one way"
