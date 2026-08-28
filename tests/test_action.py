@@ -1,0 +1,60 @@
+"""Decoding a command: rotations, the gripper map, and the setpoint ramp."""
+
+import numpy as np
+import pytest
+
+from specialist_sim import pose as se3
+from specialist_sim.action import (
+  FINGER_OPEN,
+  FINGER_SHUT,
+  gripper_from_opening,
+  opening_from_gripper,
+  turn,
+)
+
+
+def _rotations(count: int) -> list[np.ndarray]:
+  rng = np.random.default_rng(0)
+  out = []
+  for _ in range(count):
+    q, _ = np.linalg.qr(rng.normal(size=(3, 3)))
+    out.append(q * np.sign(np.linalg.det(q)))
+  return out
+
+
+@pytest.mark.parametrize("rotation", _rotations(8))
+def test_a_rotation_survives_the_four_number_round_trip(rotation: np.ndarray) -> None:
+  assert se3.rotation(se3.wxyz(rotation)) == pytest.approx(rotation, abs=1e-12)
+
+
+def test_a_quaternion_is_stored_scalar_first() -> None:
+  """A quarter turn about z, written out, so the order is pinned to a literal."""
+  quarter = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+  root = np.sqrt(0.5)
+  assert se3.wxyz(quarter) == pytest.approx([root, 0.0, 0.0, root], abs=1e-12)
+
+
+@pytest.mark.parametrize(
+  "four", [np.zeros(4), np.array([2.0, 0.0, 0.0, 0.0]), np.array([0.0, 3.0, 4.0, 0.0])]
+)
+def test_a_command_of_any_length_still_names_a_rotation(four: np.ndarray) -> None:
+  unit = turn(four)
+  assert np.linalg.norm(unit) == pytest.approx(1.0)
+  rotation = se3.rotation(unit)
+  assert rotation.T @ rotation == pytest.approx(np.eye(3), abs=1e-12)
+  assert np.linalg.det(rotation) == pytest.approx(1.0)
+
+
+def test_a_scaled_command_names_the_same_rotation() -> None:
+  """Length carries no meaning, so scaling a command may not turn the hand."""
+  quarter = se3.wxyz(np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]))
+  for scale in (0.1, 1.0, 7.0):
+    assert se3.rotation(turn(quarter * scale)) == pytest.approx(
+      se3.rotation(quarter), abs=1e-12
+    )
+
+
+def test_the_gripper_command_spans_shut_to_open() -> None:
+  assert gripper_from_opening(0.0) == pytest.approx(FINGER_SHUT)
+  assert gripper_from_opening(1.0) == pytest.approx(FINGER_OPEN)
+  assert opening_from_gripper(gripper_from_opening(0.37)) == pytest.approx(0.37)
