@@ -48,6 +48,9 @@ strict = true
 files = ["src/specialist_sim", "tests"]
 mypy_path = ["src"]
 explicit_package_bases = true
+# warp is untyped: its array and kernel annotations are not Python types, and
+# every call into it reads as untyped.
+exclude = ["src/specialist_sim/render/kernels.py", "src/specialist_sim/render/renderer.py"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -56,3 +59,7 @@ module = [
   "gymnasium", "gymnasium.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["specialist_sim.render.kernels", "specialist_sim.render.renderer"]
+follow_imports = "skip"
