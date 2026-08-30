@@ -21,19 +21,21 @@ def observation() -> dict[str, Any]:
 
 def test_every_camera_returns_a_lit_image(observation: dict[str, Any]) -> None:
   for name in GRIPPERS:
-    image = observation[name]
+    image = observation[name]["image"]
     assert image.dtype == np.uint8
     assert (image.sum(axis=2) > 0).mean() > 0.2
 
 
 def test_the_two_cameras_see_different_things(observation: dict[str, Any]) -> None:
-  assert not np.array_equal(observation[GRIPPERS[0]], observation[GRIPPERS[1]])
+  assert not np.array_equal(
+    observation[GRIPPERS[0]]["image"], observation[GRIPPERS[1]]["image"]
+  )
 
 
 def test_nothing_is_drawn_outside_the_lens_disc(observation: dict[str, Any]) -> None:
-  size = observation[GRIPPERS[0]].shape[0]
+  size = observation[GRIPPERS[0]]["image"].shape[0]
   rays = build_rays(CameraCfg().at(size), size, size, CameraCfg().mask_radius)
-  assert observation[GRIPPERS[0]][~rays.valid].sum() == 0
+  assert observation[GRIPPERS[0]]["image"][~rays.valid].sum() == 0
 
 
 def test_a_bearing_survives_the_projection_round_trip() -> None:
@@ -74,7 +76,7 @@ def test_the_env_renders_through_the_camera_it_is_given() -> None:
   lens = env.scene.model.body(f"{GRIPPERS[0]}_lens")
   assert env.scene.model.body_pos[lens.id] == pytest.approx(camera.pos)
   plain = PickPlaceEnv().reset(seed=3)[0]
-  assert not np.array_equal(moved[GRIPPERS[0]], plain[GRIPPERS[0]])
+  assert not np.array_equal(moved[GRIPPERS[0]]["image"], plain[GRIPPERS[0]]["image"])
 
 
 def test_the_lens_matches_a_pinhole_when_the_mirror_is_flat() -> None:

@@ -1,8 +1,9 @@
 """A commanded trajectory per gripper, and the wrench that chases it.
 
 An action is a trajectory of absolute poses in the room frame,
-``[position(3), quaternion(4), gripper(1)]`` per hand, at ``1 / ACTION_HZ``
-intervals from now. A control step tracks the leading poses and drops the rest,
+``[position(3), quaternion(4), opening(1)]`` per hand, at ``1 / ACTION_HZ``
+intervals from now. An opening is the coupled finger angle in radians, signed as
+the left finger turns, which is the number a corpus records. A control step tracks the leading poses and drops the rest,
 so a policy commits to further ahead than it executes.
 
 The tracker resamples the trajectory at the physics rate. The impedance's
@@ -132,7 +133,7 @@ class Hands:
     for hand, body in enumerate(self._rig):
       self._position[hand] = data.xpos[body]
       self._quaternion[hand] = se3.wxyz(data.xmat[body].reshape(3, 3))
-      self._opening[hand] = opening_from_gripper(float(data.qpos[self._finger[hand]]))
+      self._opening[hand] = float(data.qpos[self._finger[hand]])
       self._ramp_position[:, hand] = self._position[hand]
       self._ramp_rotation[:, hand] = data.xmat[body].reshape(3, 3)
       self._ramp_opening[:, hand] = self._opening[hand]
@@ -205,8 +206,7 @@ class Hands:
       ]
     )
 
-  def _command_fingers(self, data: mujoco.MjData, hand: int, opening: float) -> None:
-    angle = gripper_from_opening(opening)
+  def _command_fingers(self, data: mujoco.MjData, hand: int, angle: float) -> None:
     data.ctrl[self._servos[hand]] = (angle, -angle)
 
   def _pull(
