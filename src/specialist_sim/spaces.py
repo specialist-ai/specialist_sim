@@ -8,7 +8,7 @@ resolves.
 
 A hand's opening, in an action and in an observation alike, is the coupled
 finger angle in radians, signed as the left finger turns. That is the number a
-corpus records, so nothing converts between what is stored and what is
+dataset records, so nothing converts between what is stored and what is
 commanded.
 
 Shapes and bounds as plain values, and Gymnasium space objects on request.
@@ -52,7 +52,7 @@ ACTION_HZ = 50.0
 """How often a trajectory names a pose."""
 F_STEP = 100.0
 """How often the step timeline ticks. A row is one of its ticks, and it is the
-rate a corpus records a hand at."""
+rate a dataset records a hand at."""
 
 FINGER_LOW = -0.261799
 FINGER_HIGH = 0.698132

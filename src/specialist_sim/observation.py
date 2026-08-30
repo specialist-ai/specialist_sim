@@ -1,7 +1,7 @@
 """What the policy sees: each camera's image, and where its own hand has been.
 
 A row is one tick of the step timeline. A control step spans several of them and
-reports them all, so a policy reads a hand at the rate a corpus records one
+reports them all, so a policy reads a hand at the rate a dataset records one
 rather than at the rate it is asked to act.
 """
 
