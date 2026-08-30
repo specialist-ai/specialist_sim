@@ -10,7 +10,7 @@ import numpy as np
 
 from specialist_sim.action import FINGER_OPEN, FINGER_SHUT
 from specialist_sim.arrays import Float64Array
-from specialist_sim.spaces import GRIPPERS
+from specialist_sim.spaces import FINGER_HIGH, FINGER_LOW, GRIPPERS
 
 __all__ = ["SceneCfg", "Scene", "Gripper", "Cube"]
 
@@ -105,6 +105,12 @@ class Scene:
         raise ValueError(
           f"{joint.name} travels {low:.4f}..{high:.4f}, which does not hold "
           f"the commanded {wanted[0]:.4f}..{wanted[1]:.4f}"
+        )
+      bounds = sorted(sign * angle for angle in (FINGER_LOW, FINGER_HIGH))
+      if not np.allclose([low, high], bounds, atol=1e-6):
+        raise ValueError(
+          f"{joint.name} travels {low:.6f}..{high:.6f}, and an action is "
+          f"bounded to {bounds[0]:.6f}..{bounds[1]:.6f}"
         )
     return Gripper(
       rig=rig.id,

@@ -7,7 +7,8 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim import pose as se3
-from specialist_sim.action import hold
+from specialist_sim.action import FINGER_SHUT, gripper_from_opening, hold
+from specialist_sim.observation import flat_row
 from specialist_sim.randomise import HOME_ROTATION, place_cube
 from specialist_sim.spaces import (
   ACTION_HIGH,
@@ -20,8 +21,8 @@ from specialist_sim.spaces import (
 )
 from specialist_sim.task import TaskCfg
 
-APPROACH_OPENING = 0.4
-"""A finger opening that clears the cube."""
+CLEARING = gripper_from_opening(0.4)
+"""A finger angle that clears the cube."""
 
 
 def _command(env: PickPlaceEnv, pose: np.ndarray, seconds: float) -> dict[str, Any]:
@@ -35,13 +36,13 @@ def _command(env: PickPlaceEnv, pose: np.ndarray, seconds: float) -> dict[str, A
 def test_the_hands_reach_a_commanded_pose() -> None:
   env = PickPlaceEnv()
   obs, _ = env.reset(seed=0)
-  action = obs["state"].astype(np.float64)
+  action = flat_row(obs).astype(np.float64)
   for at in (0, PER_HAND):
     action[at] += 0.05
     action[at + 2] -= 0.05
   obs = _command(env, action, 1.0)
   for at in (0, PER_HAND):
-    assert obs["state"][at : at + 3] == pytest.approx(action[at : at + 3], abs=1e-3)
+    assert flat_row(obs)[at : at + 3] == pytest.approx(action[at : at + 3], abs=1e-3)
 
 
 def test_random_commands_do_not_diverge() -> None:
@@ -58,7 +59,7 @@ def test_random_commands_do_not_diverge() -> None:
     assert np.isfinite(env.scene.data.qvel).all()
     for hand in range(len(GRIPPERS)):
       at = hand * PER_HAND
-      reached = obs["state"][at : at + 3]
+      reached = flat_row(obs)[at : at + 3]
       assert (reached <= STATE_HIGH[at : at + 3] + 0.05).all()
       assert (reached >= STATE_LOW[at : at + 3] - 0.05).all()
 
@@ -75,16 +76,16 @@ def test_a_closed_hand_lifts_the_cube(seed: int) -> None:
   obs, info = env.reset(seed=seed)
   cube = np.asarray(info["cube_pos"], np.float64)
   hand = _nearest_hand(env, cube)
-  action = obs["state"].astype(np.float64).copy()
+  action = flat_row(obs).astype(np.float64).copy()
   at = hand * PER_HAND
   held = HOME_ROTATION[hand]
   action[at + 3 : at + 7] = se3.wxyz(held)
   over = cube - held @ env.scene.grasp
   for position, grip, seconds in (
-    (over + (0.0, 0.0, 0.10), APPROACH_OPENING, 0.9),
-    (over, APPROACH_OPENING, 1.2),
-    (over, 0.0, 1.0),
-    (over + (0.0, 0.0, 0.20), 0.0, 1.5),
+    (over + (0.0, 0.0, 0.10), CLEARING, 0.9),
+    (over, CLEARING, 1.2),
+    (over, FINGER_SHUT, 1.0),
+    (over + (0.0, 0.0, 0.20), FINGER_SHUT, 1.5),
   ):
     action[at : at + 3], action[at + 7] = position, grip
     _command(env, action, seconds)
@@ -109,7 +110,7 @@ def test_a_settled_cube_on_the_tape_pays_once() -> None:
   """The reward marks the step the episode latches, and nothing after it."""
   env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
   obs, _ = env.reset(seed=0, options={"cube": (0.60, -0.10)})
-  action = obs["state"].astype(np.float64)
+  action = flat_row(obs).astype(np.float64)
   # The cube counts as placed only once it has been off the tape.
   env.step(hold(action))
   place_cube(env.scene, env.scene.tape)
@@ -131,19 +132,19 @@ def test_a_cube_off_the_table_ends_the_episode() -> None:
   obs, _ = env.reset(seed=0)
   address = env.scene.cube.qpos
   env.scene.data.qpos[address + 2] = env.scene.table_top - 0.5
-  _, reward, terminated, _, info = env.step(hold(obs["state"]))
+  _, reward, terminated, _, info = env.step(hold(flat_row(obs)))
   assert info["dropped"] and terminated and reward == 0.0
 
 
 def test_the_hand_tracks_the_orientation_it_is_commanded() -> None:
   env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
   obs, _ = env.reset(seed=0)
-  action = obs["state"].astype(np.float64)
+  action = flat_row(obs).astype(np.float64)
   turn = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
   wanted = turn @ HOME_ROTATION[0]
   action[3:7] = se3.wxyz(wanted)
   _command(env, action, 1.5)
-  reached = se3.rotation(env.step(hold(action))[0]["state"][3:7])
+  reached = se3.rotation(flat_row(env.step(hold(action))[0])[3:7])
   assert np.linalg.norm(se3.log(wanted @ reached.T)) < 1e-2
 
 
@@ -152,14 +153,14 @@ def test_the_tracker_passes_through_every_pose_it_tracks() -> None:
   env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
   obs, _ = env.reset(seed=0)
   hands = env.hands
-  commanded = hold(obs["state"])
+  commanded = hold(flat_row(obs))
   commanded[:, 2] += 0.02 * np.arange(1, HORIZON + 1)
   hands.process(commanded)
   ramp = hands._ramp_position[:, 0, 2]
   for leg in range(hands.tracked):
     assert ramp[(leg + 1) * hands.span - 1] == pytest.approx(commanded[leg, 2])
   assert (np.diff(ramp) > 0).all(), "the setpoint jumped rather than ramped"
-  assert abs(ramp[0] - obs["state"][2]) < abs(ramp[-1] - obs["state"][2]) / 10.0
+  assert abs(ramp[0] - flat_row(obs)[2]) < abs(ramp[-1] - flat_row(obs)[2]) / 10.0
 
 
 def test_a_plan_reaches_past_the_step_that_executes_it() -> None:
@@ -167,7 +168,7 @@ def test_a_plan_reaches_past_the_step_that_executes_it() -> None:
   env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
   obs, _ = env.reset(seed=0)
   assert 0 < env.hands.tracked < HORIZON
-  kept = hold(obs["state"])
+  kept = hold(flat_row(obs))
   discarded = kept.copy()
   discarded[env.hands.tracked :, :3] += 0.3
   env.step(kept)
@@ -182,7 +183,7 @@ def test_a_plan_turns_inside_one_control_step() -> None:
   env = PickPlaceEnv(PickPlaceCfg(max_steps=400))
   obs, _ = env.reset(seed=0)
   hands = env.hands
-  commanded = hold(obs["state"])
+  commanded = hold(flat_row(obs))
   commanded[:, 2] += 0.05 * np.array([1.0, 2.0, 1.0, 0.0] * (HORIZON // 4))
   hands.process(commanded)
   ramp = hands._ramp_position[:, 0, 2]

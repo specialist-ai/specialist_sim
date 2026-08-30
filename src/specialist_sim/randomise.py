@@ -13,7 +13,7 @@ import mujoco
 import numpy as np
 
 from specialist_sim import pose as se3
-from specialist_sim.action import gripper_from_opening, turn
+from specialist_sim.action import turn
 from specialist_sim.arrays import Float64Array
 from specialist_sim.scene import Scene
 from specialist_sim.spaces import GRIPPERS, PER_HAND
@@ -98,7 +98,7 @@ def place_hands(scene: Scene, state: Float64Array) -> None:
       hand,
       one[:3],
       se3.rotation(turn(one[3:7])),
-      gripper_from_opening(float(one[7])),
+      float(one[7]),
     )
 
 
