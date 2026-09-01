@@ -10,6 +10,10 @@ import warp as wp
 REACH = 50.0
 """How far a ray is followed, in metres."""
 
+SHADOW_BIAS = 1.0e-3
+"""How far a shadow ray starts off its own surface, so a face cannot shade
+itself; shadows cast within this distance of a surface are lost."""
+
 
 @wp.func
 def nearest(
@@ -28,9 +32,9 @@ def nearest(
   for part in range(meshes.shape[0]):
     if seen[part] == 0:
       continue
-    spin = wp.transpose(rotation[part])
+    to_part = wp.transpose(rotation[part])
     hit = wp.mesh_query_ray(
-      meshes[part], spin * (origin - position[part]), spin * ray, best
+      meshes[part], to_part * (origin - position[part]), to_part * ray, best
     )
     if hit.result and hit.t < best:
       best = hit.t
@@ -48,9 +52,9 @@ def shadowed(
   ray: wp.vec3,
 ) -> bool:
   for part in range(meshes.shape[0]):
-    spin = wp.transpose(rotation[part])
+    to_part = wp.transpose(rotation[part])
     if wp.mesh_query_ray_anyhit(
-      meshes[part], spin * (origin - position[part]), spin * ray, REACH
+      meshes[part], to_part * (origin - position[part]), to_part * ray, REACH
     ):
       return True
   return False
@@ -73,13 +77,17 @@ def trace(
   fill_dir: wp.vec3,
   fill_diffuse: wp.vec3,
   ambient: wp.vec3,
-  radiance: wp.array(dtype=wp.vec3),
+  image: wp.array(dtype=wp.uint8),
   body: wp.array(dtype=wp.int32),
 ):
   i = wp.tid()
   ray = camera * bearings[i]
   struck, along, normal = nearest(meshes, position, rotation, seen, origin, ray, REACH)
+  p = pixel[i]
   if struck < 0:
+    for channel in range(3):
+      image[p * 3 + channel] = wp.uint8(0)
+    body[p] = -1
     return
   if wp.dot(normal, ray) > 0.0:
     normal = -normal
@@ -87,18 +95,12 @@ def trace(
   light = ambient
   lambert = wp.dot(normal, -key_dir)
   if lambert > 0.0:
-    if not shadowed(meshes, position, rotation, point + normal * 1.0e-3, -key_dir):
+    if not shadowed(meshes, position, rotation, point + normal * SHADOW_BIAS, -key_dir):
       light += key_diffuse * lambert
   lambert = wp.dot(normal, -fill_dir)
   if lambert > 0.0:
     light += fill_diffuse * lambert
-  radiance[pixel[i]] = wp.cw_mul(albedo[struck], light)
-  body[pixel[i]] = part_body[struck]
-
-
-@wp.kernel
-def encode(radiance: wp.array(dtype=wp.vec3), out: wp.array(dtype=wp.uint8)):
-  i = wp.tid()
-  colour = radiance[i]
+  shade = wp.cw_mul(albedo[struck], light)
   for channel in range(3):
-    out[i * 3 + channel] = wp.uint8(wp.clamp(colour[channel], 0.0, 1.0) * 255.0 + 0.5)
+    image[p * 3 + channel] = wp.uint8(wp.clamp(shade[channel], 0.0, 1.0) * 255.0 + 0.5)
+  body[p] = part_body[struck]

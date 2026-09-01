@@ -54,6 +54,10 @@ class CameraCfg:
   mask_radius: float | None = MASK_RADIUS
   """How much of the frame this camera keeps, or all of it when there is none."""
 
+  housed: bool = True
+  """Whether a ``{name}_base`` body encloses this lens, which it then cannot
+  see; a free-standing camera says no and hides nothing."""
+
   def at(self, width: int) -> MeiParams:
     """The same lens rendered ``width`` pixels across."""
     return rescale(self.params, width / self.width)
@@ -67,6 +71,7 @@ class CameraCfg:
 SCENE_VIEW = CameraCfg(
   params=MeiParams(fx=520.0, fy=520.0, cx=240.0, cy=240.0),
   width=480,
+  housed=False,
   pos=(0.02, 0.0, 0.06),
   quat=(0.312046526844, -0.634528931637, 0.634528931637, -0.312046526844),
   mask_radius=None,

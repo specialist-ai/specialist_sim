@@ -41,7 +41,11 @@ def seat(model: mujoco.MjModel, name: str) -> int:
 
 
 class _Camera:
-  """One lens: where it rides, what it may see, and where its pixels land."""
+  """One lens: where it rides, what it may see, and where its pixels land.
+
+  Pixels outside the lens disc are written once here — black, no body — and
+  the trace never touches them again.
+  """
 
   def __init__(
     self, body: int, hidden: set[int], size: int, parts: int, camera: CameraCfg
@@ -54,9 +58,8 @@ class _Camera:
     seen = np.ones(parts, np.int32)
     seen[sorted(hidden)] = 0
     self.seen = wp.array(seen, dtype=wp.int32)
-    self.radiance = wp.zeros(size * size, dtype=wp.vec3)
     self.image = wp.zeros(size * size * 3, dtype=wp.uint8)
-    self.segment = wp.zeros(size * size, dtype=wp.int32)
+    self.body_hit = wp.array(np.full(size * size, -1, np.int32), dtype=wp.int32)
 
 
 class Renderer:
@@ -64,38 +67,30 @@ class Renderer:
 
   def __init__(self, model: mujoco.MjModel, cameras: dict[str, CameraCfg], size: int):
     wp.init()
-    self.geometry = gather(model)
-    geometry = self.geometry
-    self._parts: list[wp.Mesh] = []
-    for slot in range(len(geometry.geoms)):
-      mine = np.flatnonzero(geometry.vertex_geom == slot)
-      faces = geometry.faces.reshape(-1, 3)[geometry.face_geom == slot] - mine[0]
-      self._parts.append(
-        wp.Mesh(
-          points=wp.array(geometry.vertices[mine], dtype=wp.vec3),
-          indices=wp.array(np.ascontiguousarray(faces.ravel()), dtype=wp.int32),
-        )
+    self.parts = gather(model)
+    self._meshes = [
+      wp.Mesh(
+        points=wp.array(part.vertices, dtype=wp.vec3),
+        indices=wp.array(np.ascontiguousarray(part.faces.ravel()), dtype=wp.int32),
       )
-    self.meshes = wp.array([part.id for part in self._parts], dtype=wp.uint64)
-    self.position = wp.zeros(len(geometry.geoms), dtype=wp.vec3)
-    self.rotation = wp.zeros(len(geometry.geoms), dtype=wp.mat33)
-    self.albedo = wp.array(geometry.albedo, dtype=wp.vec3)
+      for part in self.parts
+    ]
+    self.meshes = wp.array([mesh.id for mesh in self._meshes], dtype=wp.uint64)
+    self.geoms = np.array([part.geom for part in self.parts], np.int32)
+    self.position = wp.zeros(len(self.parts), dtype=wp.vec3)
+    self.rotation = wp.zeros(len(self.parts), dtype=wp.mat33)
+    self.albedo = wp.array(
+      np.stack([part.albedo for part in self.parts]), dtype=wp.vec3
+    )
     self.part_body = wp.array(
-      np.array(
-        [
-          geometry.face_body[geometry.face_geom == s][0]
-          for s in range(len(geometry.geoms))
-        ],
-        np.int32,
-      ),
-      dtype=wp.int32,
+      np.array([part.body for part in self.parts], np.int32), dtype=wp.int32
     )
     self.cameras = {
       name: _Camera(
         seat(model, name),
-        self._housing(model, name),
+        self._housing(model, name, camera),
         size,
-        len(geometry.geoms),
+        len(self.parts),
         camera,
       )
       for name, camera in cameras.items()
@@ -103,15 +98,12 @@ class Renderer:
     self._key, self._fill, self._ambient = self._lights(model)
 
   def render(self, data: mujoco.MjData) -> dict[str, View]:
-    geoms = self.geometry.geoms
-    self.position.assign(np.ascontiguousarray(data.geom_xpos[geoms], np.float32))
+    self.position.assign(np.ascontiguousarray(data.geom_xpos[self.geoms], np.float32))
     self.rotation.assign(
-      np.ascontiguousarray(data.geom_xmat[geoms].reshape(-1, 3, 3), np.float32)
+      np.ascontiguousarray(data.geom_xmat[self.geoms].reshape(-1, 3, 3), np.float32)
     )
     out = {}
     for slot, camera in self.cameras.items():
-      camera.radiance.zero_()
-      camera.segment.fill_(-1)
       wp.launch(
         kernels.trace,
         dim=len(camera.pixel),
@@ -129,31 +121,33 @@ class Renderer:
           *self._key,
           *self._fill,
           self._ambient,
-          camera.radiance,
-          camera.segment,
+          camera.image,
+          camera.body_hit,
         ],
-      )
-      wp.launch(
-        kernels.encode, dim=camera.size**2, inputs=[camera.radiance, camera.image]
       )
       out[slot] = View(
         image=camera.image.numpy().reshape(camera.size, camera.size, 3).copy(),
-        body=camera.segment.numpy().reshape(camera.size, camera.size).copy(),
+        body=camera.body_hit.numpy().reshape(camera.size, camera.size).copy(),
       )
     return out
 
-  def _housing(self, model: mujoco.MjModel, name: str) -> set[int]:
+  def _housing(self, model: mujoco.MjModel, name: str, camera: CameraCfg) -> set[int]:
     """What a lens sits inside, and so cannot see."""
+    if not camera.housed:
+      return set()
     base = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{name}_base")
-    return {
-      index
-      for index, geom in enumerate(self.geometry.geoms)
-      if model.geom_bodyid[geom] == base
-    }
+    if base < 0:
+      raise ValueError(f"{name} is housed, and the scene has no {name}_base body")
+    return {index for index, part in enumerate(self.parts) if part.body == base}
 
   def _lights(
     self, model: mujoco.MjModel
   ) -> tuple[tuple[wp.vec3, wp.vec3], tuple[wp.vec3, wp.vec3], wp.vec3]:
+    still = [i for i in range(model.nlight) if model.light_bodyid[i] != 0]
+    if still:
+      raise ValueError(
+        "lights are read once at construction, so they must ride the world body"
+      )
     casting = [i for i in range(model.nlight) if model.light_castshadow[i]]
     flat = [i for i in range(model.nlight) if not model.light_castshadow[i]]
     if len(casting) != 1 or len(flat) != 1:
