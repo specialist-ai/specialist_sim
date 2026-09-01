@@ -7,17 +7,19 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim import pose as se3
-from specialist_sim.action import FINGER_SHUT, gripper_from_opening, hold
+from specialist_sim.action import hold
 from specialist_sim.observation import flat_row
 from specialist_sim.randomise import HOME_ROTATION, place_cube
 from specialist_sim.spaces import (
   ACTION_HIGH,
   ACTION_LOW,
+  FINGER_SHUT,
   GRIPPERS,
   HORIZON,
   PER_HAND,
   STATE_HIGH,
   STATE_LOW,
+  gripper_from_opening,
 )
 from specialist_sim.task import TaskCfg
 

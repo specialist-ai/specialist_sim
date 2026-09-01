@@ -4,12 +4,12 @@ import numpy as np
 import pytest
 
 from specialist_sim import pose as se3
-from specialist_sim.action import (
+from specialist_sim.action import turn
+from specialist_sim.spaces import (
   FINGER_OPEN,
   FINGER_SHUT,
   gripper_from_opening,
   opening_from_gripper,
-  turn,
 )
 
 

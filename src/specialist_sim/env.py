@@ -83,6 +83,13 @@ class PickPlaceEnv:
       raise ValueError(
         f"the cameras are {sorted(GRIPPERS)}, not {sorted(self.cfg.cameras)}"
       )
+    if (self.cfg.action.damping, self.cfg.action.rotational_damping) != (
+      self.cfg.scene.damping,
+      self.cfg.scene.rotational_damping,
+    ):
+      raise ValueError(
+        "the feedforward cancels the rig damping, so the two must be equal"
+      )
     if not 0 <= self.cfg.camera_lag <= MAX_LAG:
       raise ValueError(
         f"a camera runs 0 to {MAX_LAG} rows behind, not {self.cfg.camera_lag}"
@@ -113,6 +120,7 @@ class PickPlaceEnv:
     self.tasks = [PickPlace(self.scene, data, self.cfg.task) for data in self.datas]
     self.task = self.tasks[0]
     """The first world's task, which is the whole of it when there is one."""
+
     threads = min(self.worlds, os.cpu_count() or 1)
     self._roll = rollout.Rollout(nthread=threads)
     self._scratch = [mujoco.MjData(model) for _ in range(threads)]
@@ -140,6 +148,9 @@ class PickPlaceEnv:
       raise ValueError("a control step must span a whole number of rows")
     self.rows = round(rows)
     """How many rows of the step timeline one control step spans."""
+    self._capture = self.rows - self.cfg.camera_lag % self.rows
+    """The row within a step the camera's frame is taken on. A whole number of
+    steps of lag lands on the boundary, which is the last row."""
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
     self._within = substeps // self.rows
@@ -221,12 +232,12 @@ class PickPlaceEnv:
       ]
     # The rows before an episode are the state it settled into, and so is every
     # frame the first boundaries ask for.
-    seen = self._render()
-    for world in chosen:
+    seen = self._render(chosen)
+    for index, world in enumerate(chosen):
       self._frames[world] = dict.fromkeys(
-        range(-self.cfg.camera_lag, 1, self.rows), seen[world]
+        range(-self.cfg.camera_lag, 1, self.rows), seen[index]
       )
-    return self._observe(), self._report()
+    return self._observe(), self._stacked([task.info() for task in self.tasks])
 
   def _starts(
     self,
@@ -297,7 +308,6 @@ class PickPlaceEnv:
     # Where in the step the camera's frame is taken, counted in rows from the
     # row each world stands on. A whole number of steps of lag lands on the
     # boundary, which is the last row of the step.
-    offset = self.rows - (self.cfg.camera_lag % self.rows)
     for substep in range(self.hands.substeps):
       here = self._state[:, self._qpos_at : self._qpos_at + model.nq]
       ctrl, wrench = self.hands.command(here, substep, model.nbody, model.nu)
@@ -318,25 +328,35 @@ class PickPlaceEnv:
         continue
       row = (substep + 1) // self._within
       self._sample(row - 1)
-      if row == offset < self.rows:
+      if row == self._capture:
         self._land()
-        self._keep(offset)
-    self._land()
-    if offset == self.rows:
-      self._keep(offset)
+        self._keep(self._capture)
+    if self._capture != self.rows:
+      self._land()
     self._at += self.rows
     self._steps += 1
     judged = [task.evaluate() for task in self.tasks]
     reward = np.array([one[0] for one in judged], np.float64)
     terminated = np.array([one[1] for one in judged], np.bool_)
     truncated = (self._steps >= self.cfg.max_steps) & ~terminated
-    return self._observe(), reward, terminated, truncated, self._report()
+    return (
+      self._observe(),
+      reward,
+      terminated,
+      truncated,
+      self._stacked([one[2] for one in judged]),
+    )
 
   def _keep(self, offset: int) -> None:
-    """Hold what every world's lenses see, on the row each of them is taking."""
+    """Hold what every world's lenses see, on the row each of them is taking,
+    and let go of every row no future observation can ask for."""
     seen = self._render()
     for world in range(self.worlds):
-      self._frames[world][int(self._at[world]) + offset] = seen[world]
+      kept = int(self._at[world]) + offset
+      self._frames[world][kept] = seen[world]
+      floor = kept - self.cfg.camera_lag
+      for older in [row for row in self._frames[world] if row < floor]:
+        del self._frames[world][older]
 
   def _sample(self, row: int) -> None:
     """Keep every world's hands at one row of the step timeline."""
@@ -356,9 +376,8 @@ class PickPlaceEnv:
       mujoco.mj_setState(self.scene.model, data, self._state[world], STATE)
       mujoco.mj_forward(self.scene.model, data)
 
-  def _report(self) -> dict[str, Any]:
-    """Every world's account of the cube, stacked."""
-    reports = [task.info() for task in self.tasks]
+  def _stacked(self, reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Every world's account of the cube, as one report."""
     return {key: np.stack([one[key] for one in reports]) for key in reports[0]}
 
   def render(self) -> np.ndarray | None:
@@ -379,14 +398,7 @@ class PickPlaceEnv:
   def _observe(self) -> dict[str, Any]:
     """The rows this step spanned, and the frame that has caught up with it."""
     taken = self._at - self.cfg.camera_lag
-    frames = []
-    for world in range(self.worlds):
-      when = int(taken[world])
-      # The frame is read rather than taken: a world restarted on its own asks
-      # the rest for what they are already looking at.
-      frames.append(self._frames[world][when])
-      for older in [row for row in self._frames[world] if row < when]:
-        del self._frames[world][older]
+    frames = [self._frames[world][int(when)] for world, when in enumerate(taken)]
     out: dict[str, Any] = {
       "step": np.stack(
         [np.arange(one - self.rows + 1, one + 1, dtype=np.int64) for one in self._at]
@@ -401,17 +413,18 @@ class PickPlaceEnv:
       }
     return out
 
-  def _render(self) -> list[dict[str, Any]]:
-    """What every world's lenses see of the configuration it currently holds."""
+  def _render(self, worlds: Sequence[int] | None = None) -> list[dict[str, Any]]:
+    """What the named worlds' lenses see, every world's when none are named."""
     if self.renderer is None:
       self.renderer = Renderer(self.scene.model, self.cfg.cameras, self.cfg.image_size)
     out = []
-    for data in self.datas:
-      self.views = self.renderer.render(data)
-      out.append({slot: view.image for slot, view in self.views.items()})
+    for world in range(self.worlds) if worlds is None else worlds:
+      views = self.renderer.render(self.datas[world])
+      if world == 0:
+        self.views = views
+      out.append({slot: view.image for slot, view in views.items()})
     return out
 
   def _penetrating(self, data: mujoco.MjData) -> bool:
-    return any(
-      data.contact[index].dist < -self.cfg.penetration for index in range(data.ncon)
-    )
+    touching: Float64Array = data.contact.dist[: data.ncon]
+    return bool((touching < -self.cfg.penetration).any())

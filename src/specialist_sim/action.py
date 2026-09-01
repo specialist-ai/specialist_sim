@@ -45,11 +45,6 @@ __all__ = [
 REST = np.array([1.0, 0.0, 0.0, 0.0])
 """The quaternion that names no turn."""
 
-FINGER_SHUT = np.radians(-9.1175)
-"""The angle at which the pads meet, which a gripper command of zero asks for."""
-FINGER_OPEN = np.radians(40.0)
-"""The joint's open limit, which a gripper command of one asks for."""
-
 
 @dataclass(frozen=True)
 class ActionCfg:
@@ -72,17 +67,6 @@ def turn(quaternion: Float64Array) -> Float64Array:
   unit = np.where(length > 1e-8, rows / np.where(length > 0.0, length, 1.0), REST)
   out: Float64Array = unit.reshape(np.shape(quaternion))
   return out
-
-
-def gripper_from_opening(opening: float) -> float:
-  """The joint angle an opening asks for, saturating at shut and open."""
-  span = float(np.clip(opening, 0.0, 1.0))
-  return float(FINGER_SHUT + span * (FINGER_OPEN - FINGER_SHUT))
-
-
-def opening_from_gripper(angle: float) -> float:
-  """The opening an angle stands for, saturating at shut and open."""
-  return float(np.clip((angle - FINGER_SHUT) / (FINGER_OPEN - FINGER_SHUT), 0.0, 1.0))
 
 
 def hold(state: Float64Array) -> Float64Array:
@@ -130,7 +114,6 @@ class Hands:
     self._ramp_twist = np.zeros((worlds, substeps, hands, 6))
     self._rigs = np.asarray(self._rig, np.int64)
     self._qadr = np.asarray([grip.qpos for grip in grippers], np.int64)
-    self._fingers = np.asarray(self._finger, np.int64)
 
   def reset(
     self, datas: Sequence[mujoco.MjData], worlds: Sequence[int] | None = None
@@ -146,8 +129,6 @@ class Hands:
         self._ramp_rotation[world, :, hand] = data.xmat[body].reshape(3, 3)
         self._ramp_opening[world, :, hand] = self._opening[world, hand]
       self._ramp_twist[world] = 0.0
-      for hand in range(len(GRIPPERS)):
-        self._command_fingers(data, hand, float(self._opening[world, hand]))
 
   def process(self, action: Float64Array) -> None:
     """Resample the leading poses onto the substeps that track them.
@@ -243,9 +224,6 @@ class Hands:
         _capped(turn * rate, self.cfg.max_turn),
       ]
     )
-
-  def _command_fingers(self, data: mujoco.MjData, hand: int, angle: float) -> None:
-    data.ctrl[self._servos[hand]] = (angle, -angle)
 
 
 def _matrices(quaternion: Float64Array) -> Float64Array:

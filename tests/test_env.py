@@ -12,7 +12,6 @@ from specialist_sim.observation import flat_row
 from specialist_sim.spaces import (
   ACTION_HIGH,
   GRIPPERS,
-  IMAGE_SHAPE,
   PER_HAND,
   STATE_HIGH,
   STATE_LOW,
@@ -30,7 +29,7 @@ def test_a_reset_reports_every_camera_and_the_hands(env: PickPlaceEnv) -> None:
   assert obs["step"][0].tolist() == list(range(1 - env.rows, 1))
   for name in GRIPPERS:
     hand = obs[name]
-    assert hand["image"].shape == (env.worlds, *IMAGE_SHAPE)
+    assert hand["image"].shape == (env.worlds, *env.image_shape)
     assert hand["image"].dtype == np.uint8
     assert hand["pose"].shape == (env.worlds, env.rows, 7)
     assert hand["pose"].dtype == np.float32
