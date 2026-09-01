@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from specialist_sim import pose as se3
-from specialist_sim.action import turn
+from specialist_sim.action import _apart, turn
 from specialist_sim.spaces import (
   FINGER_OPEN,
   FINGER_SHUT,
@@ -58,3 +58,15 @@ def test_the_gripper_command_spans_shut_to_open() -> None:
   assert gripper_from_opening(0.0) == pytest.approx(FINGER_SHUT)
   assert gripper_from_opening(1.0) == pytest.approx(FINGER_OPEN)
   assert opening_from_gripper(gripper_from_opening(0.37)) == pytest.approx(0.37)
+
+
+def test_a_half_turn_of_error_asks_for_a_half_turn_of_correction() -> None:
+  """The largest error a rotation can hold is as sound as the smallest."""
+  here = np.array([[1.0, 0.0, 0.0, 0.0]])
+  for axis in np.eye(3):
+    want = np.concatenate([[0.0], axis])[None]
+    swing = _apart(want, here)
+    assert np.isfinite(swing).all()
+    assert np.linalg.norm(swing) == pytest.approx(np.pi)
+    assert np.allclose(swing[0] / np.linalg.norm(swing), axis)
+  assert np.allclose(_apart(here, here), 0.0)

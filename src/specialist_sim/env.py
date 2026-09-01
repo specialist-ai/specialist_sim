@@ -133,6 +133,9 @@ class PickPlaceEnv:
     which would make a world's step depend on which thread ran it last."""
     self._stepped = np.zeros((self.worlds, 1, self._nstate))
     self._control = np.zeros((self.worlds, 1, mujoco.mj_stateSize(model, CONTROL)))
+    self._ctrl = self._control[:, 0, : model.nu]
+    self._xfrc = self._control[:, 0, model.nu :].reshape(self.worlds, model.nbody, 6)
+    """Views the wrench is written straight into, one row per world."""
 
   def _pace(self) -> None:
     """Fit the three clocks together: physics steps, rows, and control steps."""
@@ -153,7 +156,7 @@ class PickPlaceEnv:
     steps of lag lands on the boundary, which is the last row."""
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
-    self._within = substeps // self.rows
+    self._per_row = substeps // self.rows
 
   def _furnish(self) -> None:
     """Allocate what an episode fills: seeds, clocks, samples and frames."""
@@ -308,11 +311,9 @@ class PickPlaceEnv:
     # Where in the step the camera's frame is taken, counted in rows from the
     # row each world stands on. A whole number of steps of lag lands on the
     # boundary, which is the last row of the step.
+    here = self._state[:, self._qpos_at : self._qpos_at + model.nq]
     for substep in range(self.hands.substeps):
-      here = self._state[:, self._qpos_at : self._qpos_at + model.nq]
-      ctrl, wrench = self.hands.command(here, substep, model.nbody, model.nu)
-      self._control[:, 0, : model.nu] = ctrl
-      self._control[:, 0, model.nu :] = wrench
+      self.hands.command(here, substep, self._ctrl, self._xfrc)
       self._roll.rollout(
         model,
         self._scratch,
@@ -324,9 +325,9 @@ class PickPlaceEnv:
         initial_warmstart=self._warmstart,
       )
       self._state[:] = self._stepped[:, 0]
-      if (substep + 1) % self._within:
+      if (substep + 1) % self._per_row:
         continue
-      row = (substep + 1) // self._within
+      row = (substep + 1) // self._per_row
       self._sample(row - 1)
       if row == self._capture:
         self._land()
