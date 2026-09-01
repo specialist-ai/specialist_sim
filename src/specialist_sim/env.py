@@ -10,19 +10,18 @@ nothing here reports an age or a delay: a reader subtracts.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import mujoco
 import numpy as np
-from mujoco import rollout
 
 from specialist_sim import randomise, spaces
 from specialist_sim.action import ActionCfg, Hands
 from specialist_sim.arrays import BoolArray, Float64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
+from specialist_sim.plant import Plant
 from specialist_sim.randomise import RandomiseCfg
 from specialist_sim.render import Renderer, seat
 from specialist_sim.scene import Scene, SceneCfg
@@ -34,15 +33,6 @@ __all__ = ["PickPlaceCfg", "PickPlaceEnv"]
 
 MAX_LAG = 20
 """How many rows a camera may run behind the rest of the stack."""
-
-STATE = mujoco.mjtState.mjSTATE_FULLPHYSICS
-"""What carries from one substep to the next. A rollout names no other state, so
-the solver starts every substep from a zero warmstart, and a run of single
-substeps drifts from an unbroken one."""
-
-CONTROL = mujoco.mjtState.mjSTATE_CTRL | mujoco.mjtState.mjSTATE_XFRC_APPLIED
-"""What a substep is driven by: the finger servos, and the wrench on each rig."""
-
 
 @dataclass(frozen=True)
 class PickPlaceCfg:
@@ -61,61 +51,6 @@ class PickPlaceCfg:
   action: ActionCfg = field(default_factory=ActionCfg)
   task: TaskCfg = field(default_factory=TaskCfg)
   randomise: RandomiseCfg = field(default_factory=RandomiseCfg)
-
-
-class _Plant:
-  """Every world's physics, stepped together through mujoco's thread pool.
-
-  The state rows are the truth while a control step runs; the worlds' MjData
-  are the truth between steps, gathered at the start of one and landed at its
-  boundaries. Stepping goes one substep at a time: the impedance answers to
-  where each plant is, so the pool cannot be handed a whole control step.
-  """
-
-  def __init__(self, model: mujoco.MjModel, datas: list[mujoco.MjData]):
-    self.model, self.datas = model, datas
-    worlds = len(datas)
-    threads = min(worlds, os.cpu_count() or 1)
-    self._roll = rollout.Rollout(nthread=threads)
-    self._scratch = [mujoco.MjData(model) for _ in range(threads)]
-    self._state = np.zeros((worlds, mujoco.mj_stateSize(model, STATE)))
-    self._stepped = np.zeros((worlds, 1, self._state.shape[1]))
-    self._warmstart = np.zeros((worlds, model.nv))
-    """Zeros, always: rollout otherwise reuses whatever its scratch data held,
-    which would make a world's step depend on which thread ran it last."""
-    self._control = np.zeros((worlds, 1, mujoco.mj_stateSize(model, CONTROL)))
-    self.ctrl = self._control[:, 0, : model.nu]
-    self.xfrc = self._control[:, 0, model.nu :].reshape(worlds, model.nbody, 6)
-    """Views a command is written straight into, one row per world."""
-    self.qpos = self._state[:, 1 : 1 + model.nq]
-    self.qvel = self._state[:, 1 + model.nq : 1 + model.nq + model.nv]
-    """Views of every world's joint coordinates and velocities, current while
-    a control step runs."""
-
-  def gather(self) -> None:
-    """Take the state the worlds hold, which stepping runs from."""
-    for world, data in enumerate(self.datas):
-      mujoco.mj_getState(self.model, data, self._state[world], STATE)
-
-  def substep(self) -> None:
-    """Advance every world one physics step under the written command."""
-    self._roll.rollout(
-      self.model,
-      self._scratch,
-      self._state,
-      self._control,
-      control_spec=int(CONTROL),
-      nstep=1,
-      state=self._stepped,
-      initial_warmstart=self._warmstart,
-    )
-    self._state[:] = self._stepped[:, 0]
-
-  def land(self) -> None:
-    """Put the stepped state back on the worlds, so a reader sees what ran."""
-    for world, data in enumerate(self.datas):
-      mujoco.mj_setState(self.model, data, self._state[world], STATE)
-      mujoco.mj_forward(self.model, data)
 
 
 class PickPlaceEnv:
@@ -156,8 +91,8 @@ class PickPlaceEnv:
     self._furnish()
 
   def _stand(self) -> None:
-    """Build the worlds: the scene, its cameras seated, one data and one task
-    per world, and the plant that steps them together.
+    """Build the worlds: the scene, its cameras seated, and one data and one
+    task per world.
 
     Every camera is seated before any world computes kinematics, so the first
     frames of every world already look through a mounted lens.
@@ -172,10 +107,10 @@ class PickPlaceEnv:
     self.tasks = [PickPlace(self.scene, data, self.cfg.task) for data in self.datas]
     self.task = self.tasks[0]
     """The first world's task, which is the whole of it when there is one."""
-    self.plant = _Plant(model, self.datas)
 
   def _pace(self) -> None:
-    """Fit the three clocks together: physics steps, rows, and control steps."""
+    """Fit the three clocks together: physics steps, rows, and control steps,
+    and hand them to the plant that advances the worlds."""
     control_dt = 1.0 / self.cfg.control_hz
     substeps = round(control_dt / self.cfg.scene.physics_dt)
     if not np.isclose(substeps * self.cfg.scene.physics_dt, control_dt):
@@ -194,6 +129,15 @@ class PickPlaceEnv:
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
     self._per_row = substeps // self.rows
+    self.plant = Plant(
+      self.scene.model,
+      self.datas,
+      self.scene.grippers,
+      self.rows,
+      self._per_row,
+      self._capture,
+      self.hands,
+    )
 
   def _furnish(self) -> None:
     """Allocate what an episode fills: seeds, clocks, samples and frames."""
@@ -204,9 +148,6 @@ class PickPlaceEnv:
     """How many control steps each world has run since it was last reset."""
     self._at = np.zeros(self.worlds, np.int64)
     """The row of the step timeline each world stands on."""
-    hands = len(GRIPPERS)
-    self._poses = np.zeros((self.worlds, hands, self.rows, 7), np.float32)
-    self._openings = np.zeros((self.worlds, hands, self.rows), np.float32)
     self._frames: list[dict[int, dict[str, Any]]] = [{} for _ in range(self.worlds)]
     """What each world's lenses saw, by the row it was taken on."""
     self.renderer: Renderer | None = None
@@ -265,8 +206,10 @@ class PickPlaceEnv:
     self.plant.gather()
     for hand, grip in enumerate(self.scene.grippers):
       settled = self.plant.qpos[chosen][:, None, grip.qpos : grip.qpos + 7]
-      self._poses[chosen, hand] = settled
-      self._openings[chosen, hand] = self.plant.qpos[chosen][:, None, grip.fingers[0]]
+      self.plant.poses[chosen, hand] = settled
+      self.plant.openings[chosen, hand] = self.plant.qpos[chosen][
+        :, None, grip.fingers[0]
+      ]
     # The rows before an episode are the state it settled into, and so is every
     # frame the first boundaries ask for.
     seen = self._render(chosen)
@@ -338,22 +281,9 @@ class PickPlaceEnv:
     are: a shape does not turn on how the environment was built.
     """
     self.hands.process(action)
-    plant = self.plant
     # A world is the truth between steps, so anything moved on one since the
     # last step is what this one runs from.
-    plant.gather()
-    for substep in range(self.hands.substeps):
-      self.hands.command(plant.qpos, substep, plant.ctrl, plant.xfrc)
-      plant.substep()
-      if (substep + 1) % self._per_row:
-        continue
-      row = (substep + 1) // self._per_row
-      self._sample(row - 1)
-      if row == self._capture:
-        plant.land()
-        self._keep(self._capture)
-    if self._capture != self.rows:
-      plant.land()
+    self.plant.run(lambda: self._keep(self._capture))
     self._at += self.rows
     self._steps += 1
     judged = [task.evaluate() for task in self.tasks]
@@ -378,13 +308,6 @@ class PickPlaceEnv:
       floor = kept - self.cfg.camera_lag
       for older in [row for row in self._frames[world] if row < floor]:
         del self._frames[world][older]
-
-  def _sample(self, row: int) -> None:
-    """Keep every world's hands at one row of the step timeline."""
-    qpos = self.plant.qpos
-    for hand, grip in enumerate(self.scene.grippers):
-      self._poses[:, hand, row] = qpos[:, grip.qpos : grip.qpos + 7]
-      self._openings[:, hand, row] = qpos[:, grip.fingers[0]]
 
   def _stacked(self, reports: list[dict[str, Any]]) -> dict[str, Any]:
     """Every world's account of the cube, as one report."""
@@ -416,8 +339,8 @@ class PickPlaceEnv:
     }
     for hand, slot in enumerate(GRIPPERS):
       out[slot] = {
-        "pose": self._poses[:, hand].copy(),
-        "opening": self._openings[:, hand].copy(),
+        "pose": self.plant.poses[:, hand].copy(),
+        "opening": self.plant.openings[:, hand].copy(),
         "image": np.stack([frame[slot] for frame in frames]),
         "image_step": taken.copy(),
       }
