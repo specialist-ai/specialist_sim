@@ -27,12 +27,17 @@ from specialist_sim.render import Renderer, seat
 from specialist_sim.scene import Scene, SceneCfg
 from specialist_sim.spaces import F_STEP, GRIPPERS
 from specialist_sim.task import PickPlace, TaskCfg
+from specialist_sim.warp_plant import WarpPlant
 
 __all__ = ["PickPlaceCfg", "PickPlaceEnv"]
 
 
 MAX_LAG = 20
 """How many rows a camera may run behind the rest of the stack."""
+
+PHYSICS = ("cpu", "gpu")
+"""Where a control step is advanced: mujoco's thread pool, or mujoco_warp."""
+
 
 @dataclass(frozen=True)
 class PickPlaceCfg:
@@ -61,11 +66,15 @@ class PickPlaceEnv:
     cfg: PickPlaceCfg | None = None,
     render_mode: str | None = None,
     worlds: int = 1,
+    physics: str = "cpu",
   ):
     self.cfg = cfg or PickPlaceCfg()
     if worlds < 1:
       raise ValueError(f"an environment holds one world or more, not {worlds}")
     self.worlds = worlds
+    if physics not in PHYSICS:
+      raise ValueError(f"{physics} is not one of {list(PHYSICS)}")
+    self.physics = physics
     modes = PickPlaceEnv.metadata["render_modes"]
     if render_mode is not None and render_mode not in modes:
       raise ValueError(f"{render_mode} is not one of {modes}")
@@ -129,7 +138,8 @@ class PickPlaceEnv:
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
     self._per_row = substeps // self.rows
-    self.plant = Plant(
+    build = Plant if self.physics == "cpu" else WarpPlant
+    self.plant = build(
       self.scene.model,
       self.datas,
       self.scene.grippers,

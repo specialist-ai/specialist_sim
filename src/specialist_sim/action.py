@@ -119,6 +119,18 @@ class Hands:
     self._servo_left = np.asarray([servos[0] for servos in self._servos], np.int64)
     self._servo_right = np.asarray([servos[1] for servos in self._servos], np.int64)
 
+  @property
+  def ramps(self) -> tuple[Float64Array, Float64Array, Float64Array, Float64Array]:
+    """The position, wxyz rotation, opening and twist every substep is tracking,
+    each ``(worlds, substeps, hands, ...)``. A plant that steps off the host
+    uploads these rather than calling ``command`` between substeps."""
+    return (
+      self._ramp_position,
+      self._ramp_quaternion,
+      self._ramp_opening,
+      self._ramp_twist,
+    )
+
   def reset(
     self, datas: Sequence[mujoco.MjData], worlds: Sequence[int] | None = None
   ) -> None:

@@ -13,6 +13,8 @@ dependencies = [
 [project.optional-dependencies]
 # The spaces as Gymnasium objects.
 gym = ["gymnasium>=1.3"]
+# Physics on the GPU, which physics="gpu" needs and nothing else does.
+gpu = ["mujoco-warp>=3.12"]
 
 [dependency-groups]
 dev = [
@@ -50,16 +52,25 @@ mypy_path = ["src"]
 explicit_package_bases = true
 # warp is untyped: its array and kernel annotations are not Python types, and
 # every call into it reads as untyped.
-exclude = ["src/specialist_sim/render/kernels.py", "src/specialist_sim/render/renderer.py"]
+exclude = [
+  "src/specialist_sim/render/kernels.py",
+  "src/specialist_sim/render/renderer.py",
+  "src/specialist_sim/warp_plant.py",
+]
 
 [[tool.mypy.overrides]]
 module = [
   "mujoco", "mujoco.*",
+  "mujoco_warp",
   "warp", "warp.*",
   "gymnasium", "gymnasium.*",
 ]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["specialist_sim.render.kernels", "specialist_sim.render.renderer"]
+module = [
+  "specialist_sim.render.kernels",
+  "specialist_sim.render.renderer",
+  "specialist_sim.warp_plant",
+]
 follow_imports = "skip"
