@@ -331,7 +331,7 @@ class PickPlaceEnv:
       self.watcher = Renderer(
         self.scene.model, {"scene_view": SCENE_VIEW}, self.cfg.render_size
       )
-    watched: np.ndarray = self.watcher.render(self.scene.data)["scene_view"].image
+    watched: np.ndarray = self.watcher.render([self.scene.data])[0]["scene_view"].image
     return watched
 
   def close(self) -> None:
@@ -359,14 +359,14 @@ class PickPlaceEnv:
   def _render(self, worlds: Sequence[int] | None = None) -> list[dict[str, Any]]:
     """What the named worlds' lenses see, every world's when none are named."""
     if self.renderer is None:
-      self.renderer = Renderer(self.scene.model, self.cfg.cameras, self.cfg.image_size)
-    out = []
-    for world in range(self.worlds) if worlds is None else worlds:
-      views = self.renderer.render(self.datas[world])
-      if world == 0:
-        self.views = views
-      out.append({slot: view.image for slot, view in views.items()})
-    return out
+      self.renderer = Renderer(
+        self.scene.model, self.cfg.cameras, self.cfg.image_size, self.worlds
+      )
+    chosen = list(range(self.worlds)) if worlds is None else list(worlds)
+    seen = self.renderer.render([self.datas[world] for world in chosen])
+    if 0 in chosen:
+      self.views = seen[chosen.index(0)]
+    return [{slot: view.image for slot, view in views.items()} for views in seen]
 
   def _penetrating(self, data: mujoco.MjData) -> bool:
     touching: Float64Array = data.contact.dist[: data.ncon]
