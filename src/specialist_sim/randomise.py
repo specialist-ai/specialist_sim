@@ -60,22 +60,26 @@ class RandomiseCfg:
 
 
 def place_cube(
-  scene: Scene, spot: Sequence[float] | Float64Array, yaw: float = 0.0
+  scene: Scene,
+  data: mujoco.MjData,
+  spot: Sequence[float] | Float64Array,
+  yaw: float = 0.0,
 ) -> None:
   """Rest the cube upright at a spot on the table, turned about its own axis."""
   quaternion = np.empty(4)
   mujoco.mju_axisAngle2Quat(quaternion, np.array([0.0, 0.0, 1.0]), yaw)
   address = scene.cube.qpos
-  scene.data.qpos[address : address + 3] = (
+  data.qpos[address : address + 3] = (
     spot[0],
     spot[1],
     scene.cube.rest + CLEARANCE,
   )
-  scene.data.qpos[address + 3 : address + 7] = quaternion
+  data.qpos[address + 3 : address + 7] = quaternion
 
 
 def place_hand(
   scene: Scene,
+  data: mujoco.MjData,
   hand: int,
   position: Sequence[float] | Float64Array,
   rotation: Float64Array,
@@ -83,18 +87,19 @@ def place_hand(
 ) -> None:
   """Put one hand at a pose, its two fingers mirrored to an angle."""
   grip = scene.grippers[hand]
-  scene.data.qpos[grip.qpos : grip.qpos + 3] = position
-  scene.data.qpos[grip.qpos + 3 : grip.qpos + 7] = se3.wxyz(rotation)
+  data.qpos[grip.qpos : grip.qpos + 3] = position
+  data.qpos[grip.qpos + 3 : grip.qpos + 7] = se3.wxyz(rotation)
   for address, sign in zip(grip.fingers, (1.0, -1.0), strict=True):
-    scene.data.qpos[address] = sign * finger
+    data.qpos[address] = sign * finger
 
 
-def place_hands(scene: Scene, state: Float64Array) -> None:
+def place_hands(scene: Scene, data: mujoco.MjData, state: Float64Array) -> None:
   """Put every hand exactly where a state vector says."""
   for hand in range(len(GRIPPERS)):
     one = state[hand * PER_HAND : (hand + 1) * PER_HAND]
     place_hand(
       scene,
+      data,
       hand,
       one[:3],
       se3.rotation(turn(one[3:7])),
@@ -102,30 +107,34 @@ def place_hands(scene: Scene, state: Float64Array) -> None:
     )
 
 
-def sample_cube(scene: Scene, rng: np.random.Generator, cfg: RandomiseCfg) -> None:
+def sample_cube(
+  scene: Scene, data: mujoco.MjData, rng: np.random.Generator, cfg: RandomiseCfg
+) -> None:
   """On the tape, at any quarter turn.
 
   An episode opens where the last one left off, so the spread of places the cube
   is picked up from is the spread a kick produces rather than one drawn from a
   patch that no episode ever ends in.
   """
-  place_cube(scene, scene.tape, rng.uniform(0.0, cfg.cube_turn))
+  place_cube(scene, data, scene.tape, rng.uniform(0.0, cfg.cube_turn))
 
 
-def sample_hands(scene: Scene, rng: np.random.Generator, cfg: RandomiseCfg) -> None:
+def sample_hands(
+  scene: Scene, data: mujoco.MjData, rng: np.random.Generator, cfg: RandomiseCfg
+) -> None:
   """Both hands near home, held part open."""
   for hand in range(len(GRIPPERS)):
     rotation = _turn(rng, cfg.hand_turn) @ HOME_ROTATION[hand]
     jitter = rng.uniform(-cfg.hand_jitter, cfg.hand_jitter, size=3)
-    place_hand(scene, hand, home(scene, hand) + jitter, rotation, FINGER_HOME)
+    place_hand(scene, data, hand, home(scene, hand) + jitter, rotation, FINGER_HOME)
 
 
-def nominal(scene: Scene) -> None:
+def nominal(scene: Scene, data: mujoco.MjData) -> None:
   """A fixed valid state, for when sampling keeps failing."""
-  mujoco.mj_resetData(scene.model, scene.data)
-  place_cube(scene, scene.tape)
+  mujoco.mj_resetData(scene.model, data)
+  place_cube(scene, data, scene.tape)
   for hand in range(len(GRIPPERS)):
-    place_hand(scene, hand, home(scene, hand), HOME_ROTATION[hand], FINGER_HOME)
+    place_hand(scene, data, hand, home(scene, hand), HOME_ROTATION[hand], FINGER_HOME)
 
 
 def home(scene: Scene, hand: int) -> Float64Array:

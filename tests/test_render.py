@@ -33,9 +33,9 @@ def test_the_two_cameras_see_different_things(observation: dict[str, Any]) -> No
 
 
 def test_nothing_is_drawn_outside_the_lens_disc(observation: dict[str, Any]) -> None:
-  size = observation[GRIPPERS[0]]["image"].shape[0]
+  size = observation[GRIPPERS[0]]["image"].shape[1]
   rays = build_rays(CameraCfg().at(size), size, size, CameraCfg().mask_radius)
-  assert observation[GRIPPERS[0]]["image"][~rays.valid].sum() == 0
+  assert observation[GRIPPERS[0]]["image"][0][~rays.valid].sum() == 0
 
 
 def test_a_bearing_survives_the_projection_round_trip() -> None:
