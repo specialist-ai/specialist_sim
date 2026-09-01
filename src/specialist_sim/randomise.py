@@ -6,11 +6,11 @@ drawn again.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 import mujoco
 import numpy as np
+import numpy.typing as npt
 
 from specialist_sim import pose as se3
 from specialist_sim.action import turn
@@ -62,18 +62,15 @@ class RandomiseCfg:
 def place_cube(
   scene: Scene,
   data: mujoco.MjData,
-  spot: Sequence[float] | Float64Array,
+  spot: npt.ArrayLike,
   yaw: float = 0.0,
 ) -> None:
   """Rest the cube upright at a spot on the table, turned about its own axis."""
   quaternion = np.empty(4)
   mujoco.mju_axisAngle2Quat(quaternion, np.array([0.0, 0.0, 1.0]), yaw)
   address = scene.cube.qpos
-  data.qpos[address : address + 3] = (
-    spot[0],
-    spot[1],
-    scene.cube.rest + CLEARANCE,
-  )
+  place = np.asarray(spot, np.float64)
+  data.qpos[address : address + 3] = (place[0], place[1], scene.cube.rest + CLEARANCE)
   data.qpos[address + 3 : address + 7] = quaternion
 
 
@@ -81,7 +78,7 @@ def place_hand(
   scene: Scene,
   data: mujoco.MjData,
   hand: int,
-  position: Sequence[float] | Float64Array,
+  position: npt.ArrayLike,
   rotation: Float64Array,
   finger: float,
 ) -> None:

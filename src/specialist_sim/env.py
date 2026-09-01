@@ -63,6 +63,61 @@ class PickPlaceCfg:
   randomise: RandomiseCfg = field(default_factory=RandomiseCfg)
 
 
+class _Plant:
+  """Every world's physics, stepped together through mujoco's thread pool.
+
+  The state rows are the truth while a control step runs; the worlds' MjData
+  are the truth between steps, gathered at the start of one and landed at its
+  boundaries. Stepping goes one substep at a time: the impedance answers to
+  where each plant is, so the pool cannot be handed a whole control step.
+  """
+
+  def __init__(self, model: mujoco.MjModel, datas: list[mujoco.MjData]):
+    self.model, self.datas = model, datas
+    worlds = len(datas)
+    threads = min(worlds, os.cpu_count() or 1)
+    self._roll = rollout.Rollout(nthread=threads)
+    self._scratch = [mujoco.MjData(model) for _ in range(threads)]
+    self._state = np.zeros((worlds, mujoco.mj_stateSize(model, STATE)))
+    self._stepped = np.zeros((worlds, 1, self._state.shape[1]))
+    self._warmstart = np.zeros((worlds, model.nv))
+    """Zeros, always: rollout otherwise reuses whatever its scratch data held,
+    which would make a world's step depend on which thread ran it last."""
+    self._control = np.zeros((worlds, 1, mujoco.mj_stateSize(model, CONTROL)))
+    self.ctrl = self._control[:, 0, : model.nu]
+    self.xfrc = self._control[:, 0, model.nu :].reshape(worlds, model.nbody, 6)
+    """Views a command is written straight into, one row per world."""
+    self.qpos = self._state[:, 1 : 1 + model.nq]
+    self.qvel = self._state[:, 1 + model.nq : 1 + model.nq + model.nv]
+    """Views of every world's joint coordinates and velocities, current while
+    a control step runs."""
+
+  def gather(self) -> None:
+    """Take the state the worlds hold, which stepping runs from."""
+    for world, data in enumerate(self.datas):
+      mujoco.mj_getState(self.model, data, self._state[world], STATE)
+
+  def substep(self) -> None:
+    """Advance every world one physics step under the written command."""
+    self._roll.rollout(
+      self.model,
+      self._scratch,
+      self._state,
+      self._control,
+      control_spec=int(CONTROL),
+      nstep=1,
+      state=self._stepped,
+      initial_warmstart=self._warmstart,
+    )
+    self._state[:] = self._stepped[:, 0]
+
+  def land(self) -> None:
+    """Put the stepped state back on the worlds, so a reader sees what ran."""
+    for world, data in enumerate(self.datas):
+      mujoco.mj_setState(self.model, data, self._state[world], STATE)
+      mujoco.mj_forward(self.model, data)
+
+
 class PickPlaceEnv:
   metadata: dict[str, Any] = {"render_modes": ["rgb_array"], "render_fps": 10}
 
@@ -101,17 +156,14 @@ class PickPlaceEnv:
     self._furnish()
 
   def _stand(self) -> None:
-    """Build the worlds: the scene, one data and one task per world, and the
-    machinery that steps them together.
+    """Build the worlds: the scene, its cameras seated, one data and one task
+    per world, and the plant that steps them together.
 
-    Stepping runs in mujoco's own pool, one scratch per thread, a substep at a
-    time: the impedance answers to where the plant is, so it cannot be handed
-    a whole control step to run unattended.
+    Every camera is seated before any world computes kinematics, so the first
+    frames of every world already look through a mounted lens.
     """
     self.scene = Scene(self.cfg.scene)
     model = self.scene.model
-    # Every camera is seated before any world computes kinematics, so the
-    # first frames of every world already look through a mounted lens.
     for name, camera in {**self.cfg.cameras, "scene_view": SCENE_VIEW}.items():
       camera.mount(model, seat(model, name))
     self.datas = [self.scene.data] + [
@@ -120,22 +172,7 @@ class PickPlaceEnv:
     self.tasks = [PickPlace(self.scene, data, self.cfg.task) for data in self.datas]
     self.task = self.tasks[0]
     """The first world's task, which is the whole of it when there is one."""
-
-    threads = min(self.worlds, os.cpu_count() or 1)
-    self._roll = rollout.Rollout(nthread=threads)
-    self._scratch = [mujoco.MjData(model) for _ in range(threads)]
-    self._nstate = mujoco.mj_stateSize(model, STATE)
-    self._qpos_at = 1
-    """Where a state keeps its joint coordinates: just past the time."""
-    self._state = np.zeros((self.worlds, self._nstate))
-    self._warmstart = np.zeros((self.worlds, model.nv))
-    """Zeros, always: rollout otherwise reuses whatever its scratch data held,
-    which would make a world's step depend on which thread ran it last."""
-    self._stepped = np.zeros((self.worlds, 1, self._nstate))
-    self._control = np.zeros((self.worlds, 1, mujoco.mj_stateSize(model, CONTROL)))
-    self._ctrl = self._control[:, 0, : model.nu]
-    self._xfrc = self._control[:, 0, model.nu :].reshape(self.worlds, model.nbody, 6)
-    """Views the wrench is written straight into, one row per world."""
+    self.plant = _Plant(model, self.datas)
 
   def _pace(self) -> None:
     """Fit the three clocks together: physics steps, rows, and control steps."""
@@ -225,14 +262,11 @@ class PickPlaceEnv:
       self.tasks[world].reset()
       self._steps[world] = 0
       self._at[world] = 0
-    self._gather()
+    self.plant.gather()
     for hand, grip in enumerate(self.scene.grippers):
-      at = self._qpos_at + grip.qpos
-      settled = self._state[chosen][:, None, at : at + 7]
+      settled = self.plant.qpos[chosen][:, None, grip.qpos : grip.qpos + 7]
       self._poses[chosen, hand] = settled
-      self._openings[chosen, hand] = self._state[chosen][
-        :, None, self._qpos_at + grip.fingers[0]
-      ]
+      self._openings[chosen, hand] = self.plant.qpos[chosen][:, None, grip.fingers[0]]
     # The rows before an episode are the state it settled into, and so is every
     # frame the first boundaries ask for.
     seen = self._render(chosen)
@@ -304,36 +338,22 @@ class PickPlaceEnv:
     are: a shape does not turn on how the environment was built.
     """
     self.hands.process(action)
+    plant = self.plant
     # A world is the truth between steps, so anything moved on one since the
     # last step is what this one runs from.
-    self._gather()
-    model = self.scene.model
-    # Where in the step the camera's frame is taken, counted in rows from the
-    # row each world stands on. A whole number of steps of lag lands on the
-    # boundary, which is the last row of the step.
-    here = self._state[:, self._qpos_at : self._qpos_at + model.nq]
+    plant.gather()
     for substep in range(self.hands.substeps):
-      self.hands.command(here, substep, self._ctrl, self._xfrc)
-      self._roll.rollout(
-        model,
-        self._scratch,
-        self._state,
-        self._control,
-        control_spec=int(CONTROL),
-        nstep=1,
-        state=self._stepped,
-        initial_warmstart=self._warmstart,
-      )
-      self._state[:] = self._stepped[:, 0]
+      self.hands.command(plant.qpos, substep, plant.ctrl, plant.xfrc)
+      plant.substep()
       if (substep + 1) % self._per_row:
         continue
       row = (substep + 1) // self._per_row
       self._sample(row - 1)
       if row == self._capture:
-        self._land()
+        plant.land()
         self._keep(self._capture)
     if self._capture != self.rows:
-      self._land()
+      plant.land()
     self._at += self.rows
     self._steps += 1
     judged = [task.evaluate() for task in self.tasks]
@@ -361,21 +381,10 @@ class PickPlaceEnv:
 
   def _sample(self, row: int) -> None:
     """Keep every world's hands at one row of the step timeline."""
-    at = self._qpos_at
+    qpos = self.plant.qpos
     for hand, grip in enumerate(self.scene.grippers):
-      self._poses[:, hand, row] = self._state[:, at + grip.qpos : at + grip.qpos + 7]
-      self._openings[:, hand, row] = self._state[:, at + grip.fingers[0]]
-
-  def _gather(self) -> None:
-    """Take the state the worlds were placed in, which stepping runs from."""
-    for world, data in enumerate(self.datas):
-      mujoco.mj_getState(self.scene.model, data, self._state[world], STATE)
-
-  def _land(self) -> None:
-    """Put the stepped state back on the worlds, so a reader sees what ran."""
-    for world, data in enumerate(self.datas):
-      mujoco.mj_setState(self.scene.model, data, self._state[world], STATE)
-      mujoco.mj_forward(self.scene.model, data)
+      self._poses[:, hand, row] = qpos[:, grip.qpos : grip.qpos + 7]
+      self._openings[:, hand, row] = qpos[:, grip.fingers[0]]
 
   def _stacked(self, reports: list[dict[str, Any]]) -> dict[str, Any]:
     """Every world's account of the cube, as one report."""
