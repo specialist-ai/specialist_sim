@@ -6,11 +6,11 @@
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0"/>
     </default>
     <default class="pad">
-      <geom type="mesh" condim="4" group="3" solref="0.005" rgba="0.9 0.5 0.2 0.35" mass="0"/>
+      <geom type="mesh" condim="4" group="3" solref="0.010" rgba="0.9 0.5 0.2 0.35" mass="0"/>
     </default>
     <default class="finger">
       <joint actuatorfrcrange="-10 10" armature="0.00149376" frictionloss="0.02"/>
-      <general forcerange="-3 3" biastype="affine" gainprm="14.18" biasprm="0 -14.18 -0.301"/>
+      <general forcerange="-3 3" biastype="affine" gainprm="650" biasprm="0 -650 -1.97"/>
     </default>
   </default>
 
