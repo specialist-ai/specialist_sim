@@ -81,6 +81,6 @@ class PickPlace:
 
   def _held(self) -> bool:
     """Whether a pad and the cube share a contact."""
-    pairs = self.scene.data.contact.geom[: self.scene.data.ncon]
+    pairs = self.data.contact.geom[: self.data.ncon]
     touching = pairs[(pairs == self.scene.cube.geom).any(axis=1)]
     return bool(np.isin(touching, list(self.scene.pads)).any())

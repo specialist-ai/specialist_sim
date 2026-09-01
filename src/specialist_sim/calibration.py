@@ -58,11 +58,10 @@ class CameraCfg:
     """The same lens rendered ``width`` pixels across."""
     return rescale(self.params, width / self.width)
 
-  def mount(self, model: mujoco.MjModel, body: str) -> None:
+  def mount(self, model: mujoco.MjModel, body: int) -> None:
     """Move a lens body onto this camera's seat."""
-    index = model.body(body).id
-    model.body_pos[index] = self.pos
-    model.body_quat[index] = self.quat
+    model.body_pos[body] = self.pos
+    model.body_quat[body] = self.quat
 
 
 SCENE_VIEW = CameraCfg(

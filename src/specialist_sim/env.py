@@ -24,7 +24,7 @@ from specialist_sim.action import ActionCfg, Hands
 from specialist_sim.arrays import BoolArray, Float64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
 from specialist_sim.randomise import RandomiseCfg
-from specialist_sim.render import Renderer
+from specialist_sim.render import Renderer, seat
 from specialist_sim.scene import Scene, SceneCfg
 from specialist_sim.spaces import F_STEP, GRIPPERS
 from specialist_sim.task import PickPlace, TaskCfg
@@ -37,8 +37,8 @@ MAX_LAG = 20
 
 STATE = mujoco.mjtState.mjSTATE_FULLPHYSICS
 """What carries from one substep to the next. A rollout names no other state, so
-the solver's warmstart is seeded per control step rather than carried, and a run
-of single substeps drifts from an unbroken one."""
+the solver starts every substep from a zero warmstart, and a run of single
+substeps drifts from an unbroken one."""
 
 CONTROL = mujoco.mjtState.mjSTATE_CTRL | mujoco.mjtState.mjSTATE_XFRC_APPLIED
 """What a substep is driven by: the finger servos, and the wrench on each rig."""
@@ -103,6 +103,10 @@ class PickPlaceEnv:
     """
     self.scene = Scene(self.cfg.scene)
     model = self.scene.model
+    # Every camera is seated before any world computes kinematics, so the
+    # first frames of every world already look through a mounted lens.
+    for name, camera in {**self.cfg.cameras, "scene_view": SCENE_VIEW}.items():
+      camera.mount(model, seat(model, name))
     self.datas = [self.scene.data] + [
       mujoco.MjData(model) for _ in range(self.worlds - 1)
     ]
@@ -117,6 +121,8 @@ class PickPlaceEnv:
     """Where a state keeps its joint coordinates: just past the time."""
     self._state = np.zeros((self.worlds, self._nstate))
     self._warmstart = np.zeros((self.worlds, model.nv))
+    """Zeros, always: rollout otherwise reuses whatever its scratch data held,
+    which would make a world's step depend on which thread ran it last."""
     self._stepped = np.zeros((self.worlds, 1, self._nstate))
     self._control = np.zeros((self.worlds, 1, mujoco.mj_stateSize(model, CONTROL)))
 
@@ -245,13 +251,18 @@ class PickPlaceEnv:
     return out
 
   def _begin(self, world: int, data: mujoco.MjData, start: dict[str, Any]) -> None:
-    """Settle one world onto a start it can hold."""
-    for _ in range(self.cfg.reset_attempts):
+    """Settle one world onto a start it can hold.
+
+    Retries redraw only what the caller left free, so a fully named start gets
+    one attempt and fails loudly rather than quietly landing somewhere else.
+    """
+    fixed = {"state", "cube"} <= set(start)
+    for _ in range(1 if fixed else self.cfg.reset_attempts):
       self._place(world, data, start)
       if not self._penetrating(data):
         return
-      if start:
-        raise ValueError("the named start puts two bodies through each other")
+    if start:
+      raise ValueError("the named start puts two bodies through each other")
     randomise.nominal(self.scene, data)
     mujoco.mj_forward(self.scene.model, data)
 
@@ -338,7 +349,6 @@ class PickPlaceEnv:
     """Take the state the worlds were placed in, which stepping runs from."""
     for world, data in enumerate(self.datas):
       mujoco.mj_getState(self.scene.model, data, self._state[world], STATE)
-      self._warmstart[world] = data.qacc_warmstart
 
   def _land(self) -> None:
     """Put the stepped state back on the worlds, so a reader sees what ran."""
@@ -356,7 +366,9 @@ class PickPlaceEnv:
     if self.render_mode is None:
       return None
     if self.watcher is None:
-      self.watcher = self._built({"scene_view": SCENE_VIEW}, self.cfg.render_size)
+      self.watcher = Renderer(
+        self.scene.model, {"scene_view": SCENE_VIEW}, self.cfg.render_size
+      )
     watched: np.ndarray = self.watcher.render(self.scene.data)["scene_view"].image
     return watched
 
@@ -392,18 +404,12 @@ class PickPlaceEnv:
   def _render(self) -> list[dict[str, Any]]:
     """What every world's lenses see of the configuration it currently holds."""
     if self.renderer is None:
-      self.renderer = self._built(self.cfg.cameras, self.cfg.image_size)
+      self.renderer = Renderer(self.scene.model, self.cfg.cameras, self.cfg.image_size)
     out = []
     for data in self.datas:
       self.views = self.renderer.render(data)
       out.append({slot: view.image for slot, view in self.views.items()})
     return out
-
-  def _built(self, cameras: dict[str, CameraCfg], size: int) -> Renderer:
-    """A renderer with its lenses seated, and the scene carried onto the seats."""
-    built = Renderer(self.scene.model, cameras, size)
-    mujoco.mj_forward(self.scene.model, self.scene.data)
-    return built
 
   def _penetrating(self, data: mujoco.MjData) -> bool:
     return any(

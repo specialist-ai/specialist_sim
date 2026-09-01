@@ -228,6 +228,8 @@ def test_a_world_in_a_batch_walks_the_path_it_walks_alone() -> None:
   crowd = PickPlaceEnv(cfg, worlds=3)
   obs_a, _ = alone.reset(seed=7)
   obs_c, _ = crowd.reset(seeds=[5, 7, 9])
+  for slot in GRIPPERS:
+    assert np.array_equal(obs_a[slot]["image"][0], obs_c[slot]["image"][1])
   for _ in range(6):
     act_a = hold(flat_row(obs_a, world=0))
     act_c = np.stack([hold(flat_row(obs_c, world=w)) for w in range(3)])

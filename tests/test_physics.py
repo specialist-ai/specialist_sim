@@ -189,3 +189,29 @@ def test_a_plan_turns_inside_one_control_step() -> None:
   ramp = hands._ramp_position[0, :, 0, 2]
   rising = np.diff(ramp) > 0
   assert rising.any() and not rising.all(), "the setpoint only went one way"
+
+
+def test_a_grasp_in_one_world_is_not_credited_to_its_neighbours() -> None:
+  """Contacts are per world, so only the grasping world reports a held cube."""
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400), worlds=2)
+  obs, info = env.reset(seeds=[0, 0])
+  cube = np.asarray(info["cube_pos"][1], np.float64)
+  hand = _nearest_hand(env, cube)
+  at = hand * PER_HAND
+  held = HOME_ROTATION[hand]
+  over = cube - held @ env.scene.grasp
+  grasping = flat_row(obs, world=1).astype(np.float64).copy()
+  grasping[at + 3 : at + 7] = se3.wxyz(held)
+  for position, grip, seconds in (
+    (over + (0.0, 0.0, 0.10), CLEARING, 0.9),
+    (over, CLEARING, 1.2),
+    (over, FINGER_SHUT, 1.0),
+    (over + (0.0, 0.0, 0.20), FINGER_SHUT, 1.5),
+  ):
+    grasping[at : at + 3], grasping[at + 7] = position, grip
+    for _ in range(round(seconds * env.cfg.control_hz)):
+      idle = hold(flat_row(obs, world=0))
+      obs, _, _, _, info = env.step(np.stack([idle, hold(grasping)]))
+  lifted = env.datas[1].xpos[env.scene.cube.body][2] - env.scene.cube.rest
+  assert lifted > 0.05, f"the cube only rose {lifted * 1000:.1f} mm"
+  assert bool(info["held"][1]) and not bool(info["held"][0])

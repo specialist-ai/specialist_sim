@@ -20,7 +20,7 @@ from specialist_sim.rays import build_rays
 from specialist_sim.render import kernels
 from specialist_sim.render.scene import gather
 
-__all__ = ["Renderer", "View"]
+__all__ = ["Renderer", "View", "seat"]
 
 
 @dataclass(frozen=True)
@@ -31,12 +31,11 @@ class View:
   body: Int32Array
 
 
-def _seat(model: mujoco.MjModel, name: str, camera: CameraCfg) -> int:
-  """Put a camera on the body it rides, and give back that body."""
+def seat(model: mujoco.MjModel, name: str) -> int:
+  """The body a camera of this name rides."""
   for body in (f"{name}_lens", name):
     found = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body)
     if found >= 0:
-      camera.mount(model, body)
       return int(found)
   raise ValueError(f"the scene carries no body for the camera {name}")
 
@@ -93,7 +92,7 @@ class Renderer:
     )
     self.cameras = {
       name: _Camera(
-        _seat(model, name, camera),
+        seat(model, name),
         self._housing(model, name),
         size,
         len(geometry.geoms),
