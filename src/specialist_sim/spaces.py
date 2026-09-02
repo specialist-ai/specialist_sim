@@ -20,10 +20,12 @@ from typing import Any
 
 import numpy as np
 
-from specialist_sim.arrays import Float32Array, Float64Array
+from specialist_sim.arrays import Float32Array, Float64Array, Int64Array
 
 __all__ = [
+  "ROWS_PER_POSE",
   "action_bounds",
+  "pose_rows",
   "ACTION_HIGH",
   "ACTION_HZ",
   "ACTION_LOW",
@@ -79,6 +81,16 @@ def opening_from_gripper(angle: float) -> float:
 
 HORIZON = 16
 """How many poses a trajectory names."""
+
+ROWS_PER_POSE = round(F_STEP / ACTION_HZ)
+"""How many rows of the step timeline one pose of a trajectory spans."""
+
+
+def pose_rows(anchor: int, poses: int = HORIZON) -> Int64Array:
+  """The rows a trajectory planned at ``anchor`` names: pose ``i`` is reached
+  at the end of the ``i``-th span after the anchor."""
+  return anchor + ROWS_PER_POSE * np.arange(1, poses + 1, dtype=np.int64)
+
 
 _HAND_LOW = (0.25, -0.55, -0.335, *(-1.0,) * 4, FINGER_LOW)
 _HAND_HIGH = (0.85, 0.65, 0.25, *(1.0,) * 4, FINGER_HIGH)

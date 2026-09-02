@@ -10,6 +10,7 @@ nothing here reports an age or a delay: a reader subtracts.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -24,11 +25,11 @@ from specialist_sim.action import ActionCfg, Hands
 from specialist_sim.arrays import BoolArray, Float64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
 from specialist_sim.render import Renderer, seat
-from specialist_sim.scene import Scene, SceneCfg
-from specialist_sim.spaces import F_STEP, GRIPPERS
+from specialist_sim.scene import ASSETS, Scene, SceneCfg
+from specialist_sim.spaces import F_STEP, GRIPPERS, HORIZON
 from specialist_sim.task import BIMANUAL, Judge, Task
 
-__all__ = ["PickPlaceCfg", "PickPlaceEnv"]
+__all__ = ["Contract", "PickPlaceCfg", "PickPlaceEnv"]
 
 
 MAX_LAG = 20
@@ -48,7 +49,8 @@ class PickPlaceCfg:
   control_hz: float = 10.0
   camera_lag: int = 0
   """How many rows behind the boundary the delivered frame was captured."""
-  max_steps: int = 100
+  max_steps: int | None = None
+  """Steps after which a world truncates; ``None`` leaves the ending to the task."""
   image_size: int = 240
   render_size: int = 480
   reset_attempts: int = 20
@@ -60,6 +62,20 @@ class PickPlaceCfg:
   action: ActionCfg = field(default_factory=ActionCfg)
   task: Task = BIMANUAL
   """Which hands a policy drives, where the episode opens, and what ends it."""
+
+
+@dataclass(frozen=True)
+class Contract:
+  """The environment's side of the seam a policy is checked against."""
+
+  step_hz: float
+  action_hz: float
+  control_hz: float
+  horizon: int
+  image_size: int
+  mask_radius: float | None
+  driven: tuple[str, ...]
+  lenses: tuple[str, ...]
 
 
 class _Plant:
@@ -226,6 +242,34 @@ class PickPlaceEnv:
     return spaces.gym_spaces(self.image_shape, self.rows, self.driven, self.lenses)[1]
 
   @property
+  def contract(self) -> Contract:
+    """What a policy must agree with this environment on."""
+    lens = self.cfg.cameras[self.lenses[0]]
+    return Contract(
+      step_hz=F_STEP,
+      action_hz=spaces.ACTION_HZ,
+      control_hz=self.cfg.control_hz,
+      horizon=HORIZON,
+      image_size=self.cfg.image_size,
+      mask_radius=lens.mask_radius,
+      driven=self.driven,
+      lenses=self.lenses,
+    )
+
+  @property
+  def revision(self) -> str:
+    """A hash of everything that decides what this environment does with a
+    seed: the scene's assets, the configuration and the physics engine."""
+    digest = hashlib.sha256()
+    for path in sorted(ASSETS.rglob("*")):
+      if path.is_file():
+        digest.update(path.relative_to(ASSETS).as_posix().encode())
+        digest.update(path.read_bytes())
+    digest.update(repr(self.cfg).encode())
+    digest.update(mujoco.__version__.encode())
+    return digest.hexdigest()[:12]
+
+  @property
   def image_shape(self) -> tuple[int, int, int]:
     return (self.cfg.image_size, self.cfg.image_size, 3)
 
@@ -278,7 +322,10 @@ class PickPlaceEnv:
       self._frames[world] = dict.fromkeys(
         range(-self.cfg.camera_lag, 1, self.rows), seen[index]
       )
-    return self._observe(), self._stacked([judge.info() for judge in self.judges])
+    report = self._stacked([judge.info() for judge in self.judges])
+    report["clipped"] = np.zeros(self.worlds, np.int64)
+    report["tracking"] = np.zeros(self.worlds)
+    return self._observe(), report
 
   def _starts(
     self,
@@ -355,14 +402,14 @@ class PickPlaceEnv:
     judged = [judge.evaluate() for judge in self.judges]
     reward = np.array([one[0] for one in judged], np.float64)
     terminated = np.array([one[1] for one in judged], np.bool_)
-    truncated = (self._steps >= self.cfg.max_steps) & ~terminated
-    return (
-      self._observe(),
-      reward,
-      terminated,
-      truncated,
-      self._stacked([one[2] for one in judged]),
+    limit = self.cfg.max_steps
+    truncated = (
+      (self._steps >= limit) & ~terminated if limit else np.zeros_like(terminated)
     )
+    report = self._stacked([one[2] for one in judged])
+    report["clipped"] = self.hands.clipped.copy()
+    report["tracking"] = self.hands.error(self.plant.qpos, self._driven)
+    return self._observe(), reward, terminated, truncated, report
 
   def _keep(self, offset: int) -> None:
     """Hold what every world's lenses see, on the row each of them is taking,

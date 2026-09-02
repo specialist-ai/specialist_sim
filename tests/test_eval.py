@@ -8,7 +8,7 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
-from specialist_sim.eval import LIFT, LIFTS, PROTOCOL, Outcome, summary, sweep
+from specialist_sim.eval import LIFT, LIFTS, PROTOCOL, Outcome, against, summary, sweep
 from specialist_sim.observation import flat_rows
 from specialist_sim.randomise import Kicked, Region
 from specialist_sim.spaces import GRIPPERS
@@ -23,8 +23,8 @@ class _Idle:
   def __init__(self) -> None:
     self.resets: list[list[int]] = []
 
-  def reset(self, worlds: Sequence[int]) -> None:
-    self.resets.append(list(worlds))
+  def reset(self, worlds: Sequence[int], seeds: Sequence[int]) -> None:
+    self.resets.append(list(zip(worlds, seeds, strict=True)))
 
   def act(self, observation: dict[str, Any]) -> np.ndarray:
     return np.stack([hold(row) for row in flat_rows(observation)])
@@ -32,17 +32,17 @@ class _Idle:
 
 def test_a_sweep_scores_every_seed_and_restarts_worlds_alone() -> None:
   kicked = Task(driven=GRIPPERS, start=Kicked(PATCH), goal=PlacedOnTape())
-  env = PickPlaceEnv(
-    PickPlaceCfg(image_size=64, max_steps=10**6, task=kicked), worlds=2
-  )
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, task=kicked), worlds=2)
   agent = _Idle()
   outcomes = sweep(env, agent, seeds=[3, 4, 5], budget=4)
   assert [outcome.seed for outcome in outcomes] == [3, 4, 5]
   assert all(outcome.steps == 4 for outcome in outcomes)
   assert all(outcome.bucket == "neither" for outcome in outcomes)
-  assert agent.resets[0] == [0, 1], "the opening reset names every world"
-  assert len(agent.resets) == 2 and len(agent.resets[1]) == 1, (
-    "the one restart mid-batch names exactly the world that restarted"
+  assert agent.resets[0] == [(0, 3), (1, 4)], (
+    "the opening reset names every world and seed"
+  )
+  assert agent.resets[1] == [(0, 5)], (
+    "the restart names exactly the world that restarted, and its seed"
   )
   report = summary(outcomes, env, budget=4)
   assert report["episodes"] == 3 and report["success_rate"] == 0.0
@@ -51,6 +51,12 @@ def test_a_sweep_scores_every_seed_and_restarts_worlds_alone() -> None:
     set(report["clean_at_lift"]) == set(LIFTS) and report["clean_at_lift"][LIFT] == 0.0
   )
   assert (report["budget"], report["camera_lag"], report["worlds"]) == (4, 0, 2)
+  assert (
+    report["driven"] == GRIPPERS
+    and "Kicked" in report["start"]
+    and len(report["revision"]) == 12
+  )
+  assert report["tracking"] < 0.01 and report["clipped"] == 0.0
   assert report["buckets"]["neither"] == 3
 
 
@@ -62,7 +68,7 @@ def test_a_sweep_refuses_a_budget_the_environment_would_cut_short() -> None:
 
 def test_a_kicked_start_opens_the_episode_at_the_pick() -> None:
   task = Task(driven=GRIPPERS, start=Kicked(PATCH), goal=PlacedOnTape())
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, task=task))
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, task=task))
   _, info = env.reset(seed=0)
   assert not bool(info["on_target"][0]), "the cube opens off the tape"
   assert PATCH.contains(info["cube_pos"][0, :2])
@@ -71,10 +77,20 @@ def test_a_kicked_start_opens_the_episode_at_the_pick() -> None:
 
 
 def test_an_outcome_names_its_bucket() -> None:
-  base = dict(seed=0, dropped=False, steps=10, held_steps=5, lift=LIFT * 2)
+  base = dict(
+    seed=0,
+    dropped=False,
+    steps=10,
+    held_steps=5,
+    lift=LIFT * 2,
+    clipped=0,
+    tracking=0.0,
+  )
   assert Outcome(success=True, **base).bucket == "clean"
   assert Outcome(success=False, **base).bucket == "lost"
-  nudged = dict(seed=0, dropped=False, steps=10, held_steps=0, lift=0.0)
+  nudged = dict(
+    seed=0, dropped=False, steps=10, held_steps=0, lift=0.0, clipped=0, tracking=0.0
+  )
   assert Outcome(success=True, **nudged).bucket == "slid"
   assert Outcome(success=False, **nudged).bucket == "neither"
 
@@ -110,7 +126,7 @@ def test_a_region_never_draws_inside_its_hole() -> None:
 
 def test_a_bimanual_reset_is_untouched_by_the_task_machinery() -> None:
   """The default task opens as every recorded episode does: on the tape."""
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, task=BIMANUAL))
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, task=BIMANUAL))
   _, info = env.reset(seed=0)
   assert bool(info["on_target"][0])
   assert right_task(
@@ -119,6 +135,13 @@ def test_a_bimanual_reset_is_untouched_by_the_task_machinery() -> None:
 
 
 def test_the_bench_has_no_start_of_its_own() -> None:
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64))
   with pytest.raises(TypeError):
     sweep(env, _Idle(), seeds=[0], budget=1, starts=PATCH)  # type: ignore[call-arg]
+
+
+def test_an_agent_is_measured_against_the_expert_where_the_expert_drives() -> None:
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64))
+  gaps = against(env, _Idle(), driven=GRIPPERS, seeds=[0, 1], budget=6)
+  assert len(gaps) == 24 and all(np.isfinite(gaps))
+  assert max(gaps) > 0.0, "a hand that holds still is not what the expert commands"

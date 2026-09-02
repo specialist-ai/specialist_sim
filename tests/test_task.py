@@ -22,7 +22,7 @@ PATCH = Region(vertices=((0.30, -0.14), (0.62, -0.14), (0.62, 0.10), (0.30, 0.10
 
 
 def _env(task: Task, worlds: int = 1) -> PickPlaceEnv:
-  cfg = PickPlaceCfg(image_size=64, max_steps=10**6, task=task)
+  cfg = PickPlaceCfg(image_size=64, task=task)
   return PickPlaceEnv(cfg, worlds=worlds)
 
 

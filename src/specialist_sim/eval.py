@@ -21,8 +21,22 @@ from specialist_sim.action import hold
 from specialist_sim.arrays import Float64Array
 from specialist_sim.env import PickPlaceEnv
 from specialist_sim.observation import flat_row
+from specialist_sim.spaces import GRIPPERS, HORIZON, PER_HAND
 
-__all__ = ["LIFT", "LIFTS", "PROTOCOL", "Agent", "Outcome", "summary", "sweep"]
+__all__ = [
+  "BUDGET",
+  "LIFT",
+  "LIFTS",
+  "PROTOCOL",
+  "Agent",
+  "Outcome",
+  "against",
+  "summary",
+  "sweep",
+]
+
+BUDGET = 100
+"""How many control steps an episode is given, at ten a second."""
 
 LIFT = 0.010
 """How far off the table the cube must come for an episode to count as a pick."""
@@ -37,19 +51,21 @@ fixed seed, so a logged score says which protocol it came from.
 1. The bench as first landed: the cube's start drawn from the episode's own stream.
 2. The start drawn from the seed's child stream, untangled from the hands' jitter.
 3. Every start drawn from the episode's own stream by the task, the cube turned
-   off the tape as on it; an undriven hand held at its commanded setpoint.
+   off the tape as on it; an undriven hand held at its commanded setpoint; the
+   bench names each episode's seed to the agent.
 """
 
 
 class Agent(Protocol):
   """What the benchmark asks of a policy.
 
-  ``reset`` names exactly the worlds being restarted: when the bench restarts
-  one world mid-batch, the agent must clear that world's state and no other.
+  ``reset`` names exactly the worlds being restarted and the seed each one
+  runs: when the bench restarts one world mid-batch, the agent clears that
+  world's state and no other, and its noise is a function of the seed alone.
   ``act`` answers for every world at once, for the hands the task drives.
   """
 
-  def reset(self, worlds: Sequence[int]) -> None: ...
+  def reset(self, worlds: Sequence[int], seeds: Sequence[int]) -> None: ...
 
   def act(self, observation: dict[str, Any]) -> Float64Array: ...
 
@@ -64,6 +80,11 @@ class Outcome:
   steps: int
   lift: float
   held_steps: int
+  clipped: int
+  """Action entries the box cut, summed over the episode."""
+  tracking: float
+  """The median over steps of the largest gap between a driven hand and its
+  setpoint at the step's end, in metres."""
 
   @property
   def picked(self) -> bool:
@@ -95,7 +116,7 @@ def sweep(
   whose episode ends takes the next seed from the pool and restarts alone; the
   agent is told exactly which world was restarted.
   """
-  if env.cfg.max_steps <= budget:
+  if env.cfg.max_steps is not None and env.cfg.max_steps <= budget:
     raise ValueError(
       f"the environment truncates at {env.cfg.max_steps} steps, inside the "
       f"budget of {budget}: the bench must own the ending"
@@ -105,12 +126,14 @@ def sweep(
   padded = first + [first[-1]] * (env.worlds - len(first))
   del queue[: len(first)]
   observation, info = env.reset(seeds=padded)
-  agent.reset(range(env.worlds))
+  agent.reset(range(env.worlds), padded)
   rest = env.scene.cube.rest
   running: list[int | None] = list(first) + [None] * (env.worlds - len(first))
   steps = np.zeros(env.worlds, np.int64)
   lift = np.zeros(env.worlds)
   held = np.zeros(env.worlds, np.int64)
+  clipped = np.zeros(env.worlds, np.int64)
+  tracking: list[list[float]] = [[] for _ in range(env.worlds)]
   outcomes: list[Outcome] = []
   while any(seed is not None for seed in running):
     action = np.asarray(agent.act(observation), np.float64).copy()
@@ -124,6 +147,8 @@ def sweep(
       steps[world] += 1
       lift[world] = max(lift[world], float(info["cube_pos"][world, 2]) - rest)
       held[world] += bool(info["held"][world])
+      clipped[world] += int(info["clipped"][world])
+      tracking[world].append(float(info["tracking"][world]))
       if not (bool(terminated[world]) or steps[world] >= budget):
         continue
       outcomes.append(
@@ -134,14 +159,17 @@ def sweep(
           steps=int(steps[world]),
           lift=float(lift[world]),
           held_steps=int(held[world]),
+          clipped=int(clipped[world]),
+          tracking=float(np.median(tracking[world])),
         )
       )
       if queue:
         drawn = queue.pop(0)
         observation, info = env.reset(seeds=[drawn], worlds=[world])
-        agent.reset([world])
+        agent.reset([world], [drawn])
         running[world] = drawn
-        steps[world], lift[world], held[world] = 0, 0.0, 0
+        steps[world], lift[world], held[world], clipped[world] = 0, 0.0, 0, 0
+        tracking[world] = []
       else:
         running[world] = None
   return sorted(outcomes, key=lambda outcome: outcome.seed)
@@ -150,15 +178,22 @@ def sweep(
 def summary(
   outcomes: Sequence[Outcome], env: PickPlaceEnv, budget: int
 ) -> dict[str, Any]:
-  """The rates a benchmark reports, from the outcomes it produced, beside the
-  protocol they were produced under: the budget, the camera lag and how many
-  worlds ran at once, so two reports are known to be comparable."""
+  """The rates a benchmark reports, from the outcomes it produced, beside
+  everything they were produced under — the protocol, the environment's
+  revision, the task, the budget, the camera lag, the worlds — so two reports
+  are known to be comparable before their rates are."""
+  task = env.cfg.task
   wins = [outcome for outcome in outcomes if outcome.success]
   buckets = {name: 0 for name in ("clean", "slid", "lost", "neither")}
   for outcome in outcomes:
     buckets[outcome.bucket] += 1
   return {
     "protocol": PROTOCOL,
+    "revision": env.revision,
+    "driven": task.driven,
+    "lenses": task.lenses,
+    "start": repr(task.start),
+    "goal": repr(task.goal),
     "episodes": len(outcomes),
     "budget": budget,
     "camera_lag": env.cfg.camera_lag,
@@ -170,9 +205,61 @@ def summary(
       float(np.mean([outcome.steps for outcome in wins])) if wins else float("nan")
     ),
     "lift": float(np.median([outcome.lift for outcome in outcomes])),
+    "clipped": float(np.mean([outcome.clipped for outcome in outcomes])),
+    "tracking": float(np.median([outcome.tracking for outcome in outcomes])),
     "clean_at_lift": {
       lift: sum(o.success and o.picked_at(lift) for o in outcomes) / len(outcomes)
       for lift in LIFTS
     },
     "buckets": buckets,
   }
+
+
+def against(
+  env: PickPlaceEnv,
+  agent: Agent,
+  driven: Sequence[str],
+  seeds: Sequence[int],
+  budget: int,
+) -> list[float]:
+  """How far the agent's first setpoint sits from the expert's, in the states
+  the expert drives to.
+
+  The expert drives, so every state the agent answers from is one the corpus
+  is full of; the gap is what the agent gets wrong where it was taught, apart
+  from anywhere its own choices would have carried it. One gap per driven
+  hand per plan, in metres.
+  """
+  from specialist_sim.expert import Expert
+
+  hands = [GRIPPERS.index(slot) for slot in driven]
+  gaps: list[float] = []
+  for first in range(0, len(seeds), env.worlds):
+    chunk = [int(seed) for seed in seeds[first : first + env.worlds]]
+    padded = chunk + [chunk[-1]] * (env.worlds - len(chunk))
+    observation, info = env.reset(seeds=padded)
+    agent.reset(range(env.worlds), padded)
+    experts = [Expert(env, np.random.default_rng(seed)) for seed in padded]
+    live = np.arange(len(chunk))
+    for _ in range(budget):
+      planned = np.asarray(agent.act(observation), np.float64).reshape(
+        env.worlds, HORIZON, len(hands), PER_HAND
+      )
+      action = np.stack(
+        [
+          expert.act(flat_row(observation, world=world), info["cube_pos"][world])
+          for world, expert in enumerate(experts)
+        ]
+      ).reshape(env.worlds, HORIZON, len(GRIPPERS), PER_HAND)
+      for world in live:
+        gaps += [
+          float(np.linalg.norm(planned[world, 0, i, :3] - action[world, 0, hand, :3]))
+          for i, hand in enumerate(hands)
+        ]
+      observation, _, terminated, _, info = env.step(
+        action.reshape(env.worlds, HORIZON, -1)
+      )
+      live = live[~terminated[live]]
+      if not len(live):
+        break
+  return gaps

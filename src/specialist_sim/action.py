@@ -182,6 +182,15 @@ class Hands:
         self._quaternion[world, hand] = quaternion[-1]
         self._opening[world, hand] = opening[-1]
 
+  def error(self, qpos: Float64Array, driven: Sequence[int]) -> Float64Array:
+    """Each world's largest gap between a driven hand and its setpoint, in metres."""
+    gaps = np.linalg.norm(
+      qpos[:, self._at_position[list(driven)]] - self._position[:, list(driven)],
+      axis=-1,
+    )
+    out: Float64Array = gaps.max(axis=1)
+    return out
+
   def command(
     self, qpos: Float64Array, substep: int, ctrl: Float64Array, xfrc: Float64Array
   ) -> None:
