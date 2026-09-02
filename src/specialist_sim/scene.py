@@ -98,6 +98,26 @@ class Scene:
         out[world, index, 7] = state[hand.fingers[0]]
     return out
 
+  def twists(self, qpos: Float64Array, qvel: Float64Array) -> Float64Array:
+    """Every world's hands read out of ``qpos`` and ``qvel``, by forward
+    kinematics: each base's linear then angular velocity in the room's frame,
+    ``(worlds, hands, 6)``."""
+    out = np.empty((len(qpos), len(self.hands), 6))
+    twist = np.empty(6)
+    for world, (state, speed) in enumerate(zip(qpos, qvel, strict=True)):
+      self._scratch.qpos[:] = state
+      self._scratch.qvel[:] = speed
+      mujoco.mj_kinematics(self.model, self._scratch)
+      mujoco.mj_comPos(self.model, self._scratch)
+      mujoco.mj_comVel(self.model, self._scratch)
+      for index, hand in enumerate(self.hands):
+        mujoco.mj_objectVelocity(
+          self.model, self._scratch, mujoco.mjtObj.mjOBJ_XBODY, hand.base, twist, 0
+        )
+        out[world, index, :3] = twist[3:]
+        out[world, index, 3:] = twist[:3]
+    return out
+
   def _pinch(self) -> float:
     """The opening at which the pads just touch a cube seated between them.
 

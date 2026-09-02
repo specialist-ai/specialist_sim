@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+import mujoco
 import numpy as np
 import pytest
 
@@ -13,6 +14,7 @@ from specialist_sim.control import CTRL, XFRC
 from specialist_sim.embodiment import EmbodimentCfg, FloatingCfg, FreeHand
 from specialist_sim.observation import flat_row
 from specialist_sim.render import seat
+from specialist_sim.scene import Scene, SceneCfg
 from specialist_sim.spaces import GRIPPERS, HORIZON, PER_HAND
 from specialist_sim.task import BIMANUAL
 
@@ -66,3 +68,34 @@ def test_a_carrier_reports_its_base_where_it_stands(embodiment: EmbodimentCfg) -
   base, data = env.scene.hands[0].base, env.datas[0]
   assert flat_row(obs)[:3] == pytest.approx(data.xpos[base], abs=1e-6)
   assert flat_row(obs)[3:7] == pytest.approx(data.xquat[base], abs=1e-6)
+
+
+def test_a_hand_reports_the_twist_its_joint_carries_it_with(
+  embodiment: EmbodimentCfg,
+) -> None:
+  """A hand's velocity is read the same way whatever carries it: a free hand's
+  is its own joint's, and a carried hand's follows its chain."""
+  scene = Scene(SceneCfg(), embodiment.build())
+  data = mujoco.MjData(scene.model)
+  rng = np.random.default_rng(0)
+  data.qvel[:] = rng.normal(size=len(data.qvel)) * 0.1
+  twists = scene.twists(data.qpos[None].copy(), data.qvel[None].copy())
+  assert twists.shape == (1, len(scene.hands), 6)
+  assert np.isfinite(twists).all()
+  mujoco.mj_kinematics(scene.model, data)
+  for index, hand in enumerate(scene.hands):
+    if not isinstance(hand, FreeHand):
+      continue
+    dof = scene.model.jnt_dofadr[scene.model.body_jntadr[hand.rig]]
+    spin = data.xmat[hand.rig].reshape(3, 3) @ data.qvel[dof + 3 : dof + 6]
+    want = np.concatenate([data.qvel[dof : dof + 3], spin])
+    assert np.allclose(twists[0, index], want, atol=1e-12)
+
+
+def test_a_hand_at_rest_has_no_twist(embodiment: EmbodimentCfg) -> None:
+  scene = Scene(SceneCfg(), embodiment.build())
+  data = mujoco.MjData(scene.model)
+  assert np.array_equal(
+    scene.twists(data.qpos[None].copy(), data.qvel[None].copy()),
+    np.zeros((1, len(scene.hands), 6)),
+  )
