@@ -26,8 +26,8 @@ from specialist_sim.calibration import SCENE_VIEW, CameraCfg
 from specialist_sim.randomise import RandomiseCfg
 from specialist_sim.render import Renderer, seat
 from specialist_sim.scene import Scene, SceneCfg
-from specialist_sim.spaces import F_STEP, GRIPPERS
-from specialist_sim.task import PickPlace, TaskCfg
+from specialist_sim.spaces import F_STEP, GRIPPERS, HORIZON
+from specialist_sim.task import BIMANUAL, PickPlace, Task
 
 __all__ = ["PickPlaceCfg", "PickPlaceEnv"]
 
@@ -59,7 +59,8 @@ class PickPlaceCfg:
   )
   scene: SceneCfg = field(default_factory=SceneCfg)
   action: ActionCfg = field(default_factory=ActionCfg)
-  task: TaskCfg = field(default_factory=TaskCfg)
+  task: Task = BIMANUAL
+  """Which hands a policy drives, where the episode opens, and what ends it."""
   randomise: RandomiseCfg = field(default_factory=RandomiseCfg)
 
 
@@ -138,6 +139,10 @@ class PickPlaceEnv:
       raise ValueError(
         f"the cameras are {sorted(GRIPPERS)}, not {sorted(self.cfg.cameras)}"
       )
+    self.driven = self.cfg.task.driven
+    """The hands the observation and the action carry."""
+    self._driven = [GRIPPERS.index(slot) for slot in self.driven]
+    self._idle = [i for i in range(len(GRIPPERS)) if i not in self._driven]
     if (self.cfg.action.damping, self.cfg.action.rotational_damping) != (
       self.cfg.scene.damping,
       self.cfg.scene.rotational_damping,
@@ -169,7 +174,9 @@ class PickPlaceEnv:
     self.datas = [self.scene.data] + [
       mujoco.MjData(model) for _ in range(self.worlds - 1)
     ]
-    self.tasks = [PickPlace(self.scene, data, self.cfg.task) for data in self.datas]
+    self.tasks = [
+      PickPlace(self.scene, data, self.cfg.task.goal) for data in self.datas
+    ]
     self.task = self.tasks[0]
     """The first world's task, which is the whole of it when there is one."""
     self.plant = _Plant(model, self.datas)
@@ -202,6 +209,8 @@ class PickPlaceEnv:
     self.np_random = self._draws[0]
     self._steps = np.zeros(self.worlds, np.int64)
     """How many control steps each world has run since it was last reset."""
+    self._seeds = np.full(self.worlds, -1, np.int64)
+    """Each world's seed, which an off-tape start draws its own stream from."""
     self._at = np.zeros(self.worlds, np.int64)
     """The row of the step timeline each world stands on."""
     hands = len(GRIPPERS)
@@ -215,11 +224,11 @@ class PickPlaceEnv:
 
   @property
   def observation_space(self) -> Any:
-    return spaces.gym_spaces(self.image_shape, self.rows)[0]
+    return spaces.gym_spaces(self.image_shape, self.rows, self.driven)[0]
 
   @property
   def action_space(self) -> Any:
-    return spaces.gym_spaces(self.image_shape, self.rows)[1]
+    return spaces.gym_spaces(self.image_shape, self.rows, self.driven)[1]
 
   @property
   def image_shape(self) -> tuple[int, int, int]:
@@ -250,9 +259,13 @@ class PickPlaceEnv:
         raise ValueError(f"{len(chosen)} worlds want that many seeds, not {len(seeds)}")
       for world, one in zip(chosen, seeds, strict=True):
         self._draws[world] = np.random.default_rng(int(one))
+        self._seeds[world] = int(one)
     elif seed is not None:
       for index, world in enumerate(chosen):
         self._draws[world] = np.random.default_rng(seed + index)
+        self._seeds[world] = seed + index
+    else:
+      self._seeds[chosen] = -1
     self.np_random = self._draws[0]
     starts = self._starts(options, chosen)
     for world, start in zip(chosen, starts, strict=True):
@@ -301,8 +314,9 @@ class PickPlaceEnv:
   def _begin(self, world: int, data: mujoco.MjData, start: dict[str, Any]) -> None:
     """Settle one world onto a start it can hold.
 
-    Retries redraw only what the caller left free, so a fully named start gets
-    one attempt and fails loudly rather than quietly landing somewhere else.
+    Retries redraw only what the caller left free — the hands, and a cube on
+    the tape — so a fully named start gets one attempt and fails loudly rather
+    than quietly landing somewhere else.
     """
     fixed = {"state", "cube"} <= set(start)
     for _ in range(1 if fixed else self.cfg.reset_attempts):
@@ -322,10 +336,20 @@ class PickPlaceEnv:
       randomise.place_hands(self.scene, data, np.asarray(state, np.float64))
     else:
       randomise.sample_hands(self.scene, data, draw, self.cfg.randomise)
+    start = self.cfg.task.start
     if (cube := options.get("cube")) is not None:
       randomise.place_cube(self.scene, data, np.asarray(cube, np.float64))
-    else:
+    elif start is None:
       randomise.sample_cube(self.scene, data, draw, self.cfg.randomise)
+    else:
+      # The episode's own stream feeds the hands; the cube takes a child of
+      # the seed, so where it lies is not tied to where the hands begin.
+      seed = int(self._seeds[world])
+      if seed < 0:
+        seed = int(draw.integers(2**31))
+      randomise.place_cube(
+        self.scene, data, start.draw(self.scene, np.random.default_rng([seed, 1]))
+      )
     mujoco.mj_forward(self.scene.model, data)
 
   def step(
@@ -337,7 +361,7 @@ class PickPlaceEnv:
     and in everything an observation and its report carry, however many there
     are: a shape does not turn on how the environment was built.
     """
-    self.hands.process(action)
+    self.hands.process(self._whole(action))
     plant = self.plant
     # A world is the truth between steps, so anything moved on one since the
     # last step is what this one runs from.
@@ -379,6 +403,21 @@ class PickPlaceEnv:
       for older in [row for row in self._frames[world] if row < floor]:
         del self._frames[world][older]
 
+  def _whole(self, action: Float64Array) -> Float64Array:
+    """The driven hands as commanded; every other hand held where it was last seen."""
+    per = spaces.PER_HAND
+    shape = (self.worlds, HORIZON, len(self._driven) * per)
+    given = np.asarray(action, np.float64)
+    if given.size != np.prod(shape):
+      raise ValueError(f"an action has shape {shape}, not {given.shape}")
+    whole = np.empty((self.worlds, HORIZON, len(GRIPPERS), per))
+    whole[:, :, self._driven] = given.reshape(self.worlds, HORIZON, -1, per)
+    for hand in self._idle:
+      whole[:, :, hand] = np.concatenate(
+        [self._poses[:, hand, -1], self._openings[:, hand, -1, None]], axis=1
+      )[:, None]
+    return whole.reshape(self.worlds, HORIZON, -1)
+
   def _sample(self, row: int) -> None:
     """Keep every world's hands at one row of the step timeline."""
     qpos = self.plant.qpos
@@ -414,7 +453,7 @@ class PickPlaceEnv:
         [np.arange(one - self.rows + 1, one + 1, dtype=np.int64) for one in self._at]
       )
     }
-    for hand, slot in enumerate(GRIPPERS):
+    for hand, slot in zip(self._driven, self.driven, strict=True):
       out[slot] = {
         "pose": self._poses[:, hand].copy(),
         "opening": self._openings[:, hand].copy(),
@@ -426,7 +465,11 @@ class PickPlaceEnv:
   def _render(self, worlds: Sequence[int] | None = None) -> list[dict[str, Any]]:
     """What the named worlds' lenses see, every world's when none are named."""
     if self.renderer is None:
-      self.renderer = Renderer(self.scene.model, self.cfg.cameras, self.cfg.image_size)
+      self.renderer = Renderer(
+        self.scene.model,
+        {slot: self.cfg.cameras[slot] for slot in self.driven},
+        self.cfg.image_size,
+      )
     out = []
     for world in range(self.worlds) if worlds is None else worlds:
       views = self.renderer.render(self.datas[world])

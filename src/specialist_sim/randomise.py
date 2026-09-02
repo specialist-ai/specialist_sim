@@ -189,18 +189,22 @@ class Region:
     if self.hole is not None and self.hole[2] < 0.0:
       raise ValueError(f"a hole's radius is not negative: {self.hole[2]}")
 
+  def contains(self, spot: Float64Array) -> bool:
+    """Whether a point lies in the ring and out of the hole."""
+    ring = np.asarray(self.vertices, np.float64)
+    edges = np.roll(ring, -1, axis=0) - ring
+    toward = np.asarray(spot, np.float64) - ring
+    if not (edges[:, 0] * toward[:, 1] - edges[:, 1] * toward[:, 0] >= 0.0).all():
+      return False
+    return self.hole is None or bool(np.hypot(*(spot - self.hole[:2])) >= self.hole[2])
+
   def draw(self, scene: Scene, rng: np.random.Generator) -> Float64Array:
     ring = np.asarray(self.vertices, np.float64)
     low, high = ring.min(axis=0), ring.max(axis=0)
-    edges = np.roll(ring, -1, axis=0) - ring
     while True:
       spot: Float64Array = rng.uniform(low, high)
-      toward = spot - ring
-      if not (edges[:, 0] * toward[:, 1] - edges[:, 1] * toward[:, 0] >= 0.0).all():
-        continue
-      if self.hole is not None and np.hypot(*(spot - self.hole[:2])) < self.hole[2]:
-        continue
-      return spot
+      if self.contains(spot):
+        return spot
 
 
 def scattered(scene: Scene, rng: np.random.Generator, cfg: Scatter) -> Float64Array:

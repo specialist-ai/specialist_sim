@@ -20,9 +20,10 @@ from typing import Any
 
 import numpy as np
 
-from specialist_sim.arrays import Float32Array
+from specialist_sim.arrays import Float32Array, Float64Array
 
 __all__ = [
+  "action_bounds",
   "ACTION_HIGH",
   "ACTION_HZ",
   "ACTION_LOW",
@@ -92,8 +93,17 @@ ACTION_LOW: Float32Array = np.tile(STATE_LOW, (HORIZON, 1))
 ACTION_HIGH: Float32Array = np.tile(STATE_HIGH, (HORIZON, 1))
 
 
+def action_bounds(hands: int) -> tuple[Float64Array, Float64Array]:
+  """The action box for a policy driving ``hands`` of the rig's grippers."""
+  low = np.tile(np.asarray(_HAND_LOW, np.float64), (HORIZON, hands))
+  high = np.tile(np.asarray(_HAND_HIGH, np.float64), (HORIZON, hands))
+  return low, high
+
+
 def gym_spaces(
-  image_shape: tuple[int, int, int] = (240, 240, 3), rows: int = 10
+  image_shape: tuple[int, int, int] = (240, 240, 3),
+  rows: int = 10,
+  driven: tuple[str, ...] = GRIPPERS,
 ) -> tuple[Any, Any]:
   """The observation and action spaces as Gymnasium objects.
 
@@ -119,7 +129,8 @@ def gym_spaces(
   observation = gym.spaces.Dict(
     {
       "step": gym.spaces.Box(-(2**31), 2**31 - 1, (rows,), np.int64),
-      **{slot: hand for slot in GRIPPERS},
+      **{slot: hand for slot in driven},
     }
   )
-  return observation, gym.spaces.Box(ACTION_LOW, ACTION_HIGH, dtype=np.float32)
+  act_low, act_high = action_bounds(len(driven))
+  return observation, gym.spaces.Box(act_low, act_high, dtype=np.float32)

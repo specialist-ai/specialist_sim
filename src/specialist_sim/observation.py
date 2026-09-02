@@ -26,7 +26,8 @@ def flat_row(
 
 
 def flat_rows(observation: dict[str, Any], row: int = -1) -> Float64Array:
-  """Every world's hands at one row, laid out like an action."""
+  """Every world's hands at one row, laid out like an action: the hands the
+  observation carries, in the rig's order."""
   out: Float64Array = np.concatenate(
     [
       np.concatenate(
@@ -37,6 +38,7 @@ def flat_rows(observation: dict[str, Any], row: int = -1) -> Float64Array:
         axis=1,
       )
       for slot in GRIPPERS
+      if slot in observation
     ],
     axis=1,
   ).astype(np.float64)

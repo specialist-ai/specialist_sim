@@ -1,21 +1,32 @@
-"""Pick and place: the cube is taken off the tape and put back on it.
+"""A task: the hands a policy drives, where the cube starts, and what ends it.
 
-The cube begins on the tape, so sitting there is the state the episode is handed
-rather than something it achieved. It counts as placed once it has been off the
-tape and is on it again, at rest and let go of.
+The rig is always whole. Hands a task does not drive are reset, held in the
+air and seen by every lens, but absent from the observation and the action.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 import mujoco
 import numpy as np
 
+from specialist_sim.randomise import Region, Start
 from specialist_sim.scene import Scene
+from specialist_sim.spaces import GRIPPERS
 
-__all__ = ["TaskCfg", "PickPlace"]
+__all__ = [
+  "BIMANUAL",
+  "Goal",
+  "PickPlace",
+  "PlacedOnTape",
+  "RestingIn",
+  "Task",
+  "TaskCfg",
+  "left_task",
+  "right_task",
+]
 
 
 @dataclass(frozen=True)
@@ -29,12 +40,72 @@ class TaskCfg:
   settle_steps: int = 5
 
 
+class Goal(Protocol):
+  @property
+  def cfg(self) -> TaskCfg: ...
+
+  def reached(self, report: dict[str, Any], disturbed: bool) -> bool: ...
+
+
+@dataclass(frozen=True)
+class PlacedOnTape:
+  """The cube back on the tape, at rest and let go of, having been off it."""
+
+  cfg: TaskCfg = field(default_factory=TaskCfg)
+
+  def reached(self, report: dict[str, Any], disturbed: bool) -> bool:
+    return bool(disturbed and report["settled"])
+
+
+@dataclass(frozen=True)
+class RestingIn:
+  """The cube at rest off the tape, inside the region a pick begins in."""
+
+  region: Region
+  cfg: TaskCfg = field(default_factory=TaskCfg)
+
+  def reached(self, report: dict[str, Any], disturbed: bool) -> bool:
+    return bool(
+      report["resting"]
+      and not report["on_target"]
+      and not report["held"]
+      and self.region.contains(report["cube_pos"][:2])
+    )
+
+
+@dataclass(frozen=True)
+class Task:
+  driven: tuple[str, ...]
+  start: Start | None
+  """Where the cube opens off the tape; ``None`` opens it on the tape."""
+  goal: Goal
+
+  def __post_init__(self) -> None:
+    order = tuple(slot for slot in GRIPPERS if slot in self.driven)
+    if not self.driven or order != self.driven:
+      raise ValueError(
+        f"a task drives some of {GRIPPERS}, in that order, not {self.driven}"
+      )
+
+
+BIMANUAL = Task(GRIPPERS, None, PlacedOnTape())
+
+
+def right_task(region: Region) -> Task:
+  return Task((GRIPPERS[1],), region, PlacedOnTape())
+
+
+def left_task(region: Region) -> Task:
+  return Task((GRIPPERS[0],), None, RestingIn(region))
+
+
 class PickPlace:
-  def __init__(self, scene: Scene, data: mujoco.MjData, cfg: TaskCfg):
-    self.scene, self.data, self.cfg = scene, data, cfg
-    self._settled_for = 0
-    self._succeeded = False
-    self._disturbed = False
+  """One world's judge: the goal, latched once it has held for ``settle_steps``."""
+
+  def __init__(self, scene: Scene, data: mujoco.MjData, goal: Goal):
+    self.scene, self.data, self.goal = scene, data, goal
+    self.cfg = goal.cfg
+    self.reset()
 
   def reset(self) -> None:
     self._settled_for = 0
@@ -44,7 +115,7 @@ class PickPlace:
   def evaluate(self) -> tuple[float, bool, dict[str, Any]]:
     report = self.info()
     self._disturbed |= not report["on_target"]
-    settled = self._disturbed and report["settled"]
+    settled = self.goal.reached(report, self._disturbed)
     self._settled_for = self._settled_for + 1 if settled else 0
     won = self._settled_for >= self.cfg.settle_steps and not self._succeeded
     self._succeeded |= won
@@ -80,7 +151,6 @@ class PickPlace:
     return report
 
   def _held(self) -> bool:
-    """Whether a pad and the cube share a contact."""
     pairs = self.data.contact.geom[: self.data.ncon]
     touching = pairs[(pairs == self.scene.cube.geom).any(axis=1)]
     return bool(np.isin(touching, self.scene.pads).any())

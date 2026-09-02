@@ -8,9 +8,11 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
-from specialist_sim.eval import LIFT, Outcome, Region, Scatter, _start, summary, sweep
+from specialist_sim.eval import LIFT, Outcome, summary, sweep
 from specialist_sim.observation import flat_rows
-from specialist_sim.randomise import scattered
+from specialist_sim.randomise import Region, Scatter, scattered
+from specialist_sim.spaces import GRIPPERS
+from specialist_sim.task import BIMANUAL, PlacedOnTape, Task, right_task
 
 
 class _Idle:
@@ -27,9 +29,12 @@ class _Idle:
 
 
 def test_a_sweep_scores_every_seed_and_restarts_worlds_alone() -> None:
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6), worlds=2)
+  scattered = Task(driven=GRIPPERS, start=Scatter(), goal=PlacedOnTape())
+  env = PickPlaceEnv(
+    PickPlaceCfg(image_size=64, max_steps=10**6, task=scattered), worlds=2
+  )
   agent = _Idle()
-  outcomes = sweep(env, agent, seeds=[3, 4, 5], budget=4, starts=Scatter())
+  outcomes = sweep(env, agent, seeds=[3, 4, 5], budget=4)
   assert [outcome.seed for outcome in outcomes] == [3, 4, 5]
   assert all(outcome.steps == 4 for outcome in outcomes)
   assert all(outcome.bucket == "neither" for outcome in outcomes)
@@ -50,8 +55,9 @@ def test_a_sweep_refuses_a_budget_the_environment_would_cut_short() -> None:
 
 
 def test_a_scattered_start_opens_the_episode_at_the_pick() -> None:
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
   starts = Scatter()
+  task = Task(driven=GRIPPERS, start=starts, goal=PlacedOnTape())
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, task=task))
   tape = np.asarray(env.scene.tape)
   for seed in (0, 1, 2):
     spot = scattered(env.scene, np.random.default_rng(seed), starts)
@@ -59,8 +65,12 @@ def test_a_scattered_start_opens_the_episode_at_the_pick() -> None:
     assert starts.distance[0] <= away <= starts.distance[1]
     again = scattered(env.scene, np.random.default_rng(seed), starts)
     assert np.array_equal(spot, again), "a seed names one start"
-  _, info = env.reset(seed=0, options={"cube": spot})
+  _, info = env.reset(seed=0)
   assert not bool(info["on_target"][0]), "the cube opens off the tape"
+  _, again_info = env.reset(seed=0)
+  assert np.array_equal(info["cube_pos"], again_info["cube_pos"]), (
+    "a seed names one start"
+  )
 
 
 def test_an_outcome_names_its_bucket() -> None:
@@ -104,9 +114,27 @@ def test_a_region_never_draws_inside_its_hole() -> None:
 
 
 def test_a_start_is_not_drawn_from_the_stream_the_hands_are() -> None:
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
+  """The hands' jitter and the cube's start come from different streams, so
+  the cube does not shadow the hands seed after seed."""
   starts = Scatter()
-  drawn = _start(env, starts, 7)
-  assert drawn is not None
+  task = Task(driven=GRIPPERS, start=starts, goal=PlacedOnTape())
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, task=task))
+  _, info = env.reset(seed=7)
   same_stream = starts.draw(env.scene, np.random.default_rng(7))
-  assert not np.array_equal(drawn["cube"], same_stream)
+  assert not np.allclose(info["cube_pos"][0, :2], same_stream, atol=1e-6)
+
+
+def test_a_bimanual_reset_is_untouched_by_the_task_machinery() -> None:
+  """The default task opens as every recorded episode does: on the tape."""
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, task=BIMANUAL))
+  _, info = env.reset(seed=0)
+  assert bool(info["on_target"][0])
+  assert right_task(
+    Region(((0.3, -0.1), (0.6, -0.1), (0.6, 0.1), (0.3, 0.1)))
+  ).driven == ("right_gripper",)
+
+
+def test_the_bench_has_no_start_of_its_own() -> None:
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
+  with pytest.raises(TypeError):
+    sweep(env, _Idle(), seeds=[0], budget=1, starts=Scatter())  # type: ignore[call-arg]

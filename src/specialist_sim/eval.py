@@ -21,9 +21,8 @@ from specialist_sim.action import hold
 from specialist_sim.arrays import Float64Array
 from specialist_sim.env import PickPlaceEnv
 from specialist_sim.observation import flat_row
-from specialist_sim.randomise import Region, Scatter, Start
 
-__all__ = ["LIFT", "Agent", "Outcome", "Region", "Scatter", "summary", "sweep"]
+__all__ = ["LIFT", "Agent", "Outcome", "summary", "sweep"]
 
 LIFT = 0.010
 """How far off the table the cube must come for an episode to count as a pick."""
@@ -34,7 +33,7 @@ class Agent(Protocol):
 
   ``reset`` names exactly the worlds being restarted: when the bench restarts
   one world mid-batch, the agent must clear that world's state and no other.
-  ``act`` answers for every world at once with the rig's full action.
+  ``act`` answers for every world at once, for the hands the task drives.
   """
 
   def reset(self, worlds: Sequence[int]) -> None: ...
@@ -72,19 +71,13 @@ class Outcome:
 
 
 def sweep(
-  env: PickPlaceEnv,
-  agent: Agent,
-  seeds: Sequence[int],
-  budget: int,
-  starts: Start | None = None,
+  env: PickPlaceEnv, agent: Agent, seeds: Sequence[int], budget: int
 ) -> list[Outcome]:
   """Run one episode per seed, keeping every world busy, and score them all.
 
-  ``starts`` opens the episode at the pick, the cube resting where the start
-  distribution put it; without it an episode opens as training does, with the
-  cube on the tape. A world whose episode ends takes the next seed
-  from the pool and restarts alone; the agent is told exactly which world was
-  restarted.
+  Where an episode opens and what ends it are the environment's task. A world
+  whose episode ends takes the next seed from the pool and restarts alone; the
+  agent is told exactly which world was restarted.
   """
   if env.cfg.max_steps <= budget:
     raise ValueError(
@@ -95,9 +88,7 @@ def sweep(
   first = queue[: env.worlds] or [0]
   padded = first + [first[-1]] * (env.worlds - len(first))
   del queue[: len(first)]
-  observation, info = env.reset(
-    seeds=padded, options=[_start(env, starts, seed) for seed in padded]
-  )
+  observation, info = env.reset(seeds=padded)
   agent.reset(range(env.worlds))
   rest = env.scene.cube.rest
   running: list[int | None] = list(first) + [None] * (env.worlds - len(first))
@@ -131,9 +122,7 @@ def sweep(
       )
       if queue:
         drawn = queue.pop(0)
-        observation, info = env.reset(
-          seeds=[drawn], worlds=[world], options=[_start(env, starts, drawn)]
-        )
+        observation, info = env.reset(seeds=[drawn], worlds=[world])
         agent.reset([world])
         running[world] = drawn
         steps[world], lift[world], held[world] = 0, 0.0, 0
@@ -166,15 +155,3 @@ def summary(
     "lift": float(np.median([outcome.lift for outcome in outcomes])),
     "buckets": buckets,
   }
-
-
-def _start(env: PickPlaceEnv, starts: Start | None, seed: int) -> dict[str, Any] | None:
-  """Where this seed's episode opens, drawn from a stream of the seed's own.
-
-  The environment seeds its own draws — the hands' jitter — from the bare
-  seed; a start drawn from that same stream would take the same numbers, and
-  where the cube lies would be tied to where the hands begin.
-  """
-  if starts is None:
-    return None
-  return {"cube": starts.draw(env.scene, np.random.default_rng([seed, 1]))}
