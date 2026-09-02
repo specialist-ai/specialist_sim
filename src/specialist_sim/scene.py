@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import mujoco
 import numpy as np
 
-from specialist_sim.action import FINGER_OPEN, FINGER_SHUT
 from specialist_sim.arrays import Float64Array
-from specialist_sim.spaces import FINGER_HIGH, FINGER_LOW, GRIPPERS
+from specialist_sim.spaces import (
+  FINGER_HIGH,
+  FINGER_LOW,
+  FINGER_OPEN,
+  FINGER_SHUT,
+  GRIPPERS,
+)
 
 __all__ = ["SceneCfg", "Scene", "Gripper", "Cube"]
 
@@ -20,6 +26,10 @@ ASSETS = Path(__file__).parent / "assets"
 @dataclass(frozen=True)
 class SceneCfg:
   physics_dt: float = 1.0 / 2000.0
+  damping: float = 60.0
+  rotational_damping: float = 0.5
+  """What slows a free rig, which the impedance's feedforward exists to cancel:
+  the two must be the same numbers, and the environment holds them to it."""
 
 
 @dataclass(frozen=True)
@@ -82,21 +92,26 @@ class Scene:
       side=side,
       rest=self.table_top + side / 2.0,
     )
-    self.grippers = tuple(self._gripper(slot) for slot in GRIPPERS)
-    self.pads = frozenset(
-      geom
-      for geom in range(self.model.ngeom)
-      if (mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom) or "").endswith(
-        tuple(f"_pad{i}" for i in range(12))
-      )
+    self.grippers = tuple(self._gripper(slot, cfg) for slot in GRIPPERS)
+    self.pads = np.array(
+      sorted(
+        geom
+        for geom in range(self.model.ngeom)
+        if re.search(
+          r"_pad\d+$",
+          mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom) or "",
+        )
+      ),
+      np.int64,
     )
+    """Every finger pad's geom, which is what a grasp touches with."""
     self.grasp = self._grasp()
     """Where a hand's pads meet when shut, in its base frame."""
 
-  def _gripper(self, slot: str) -> Gripper:
+  def _gripper(self, slot: str, cfg: SceneCfg) -> Gripper:
     rig = self.model.body(f"{slot}_rig")
     damping = self.model.dof_damping[rig.dofadr[0] : rig.dofadr[0] + 6]
-    damping[:3], damping[3:] = 60.0, 0.5
+    damping[:3], damping[3:] = cfg.damping, cfg.rotational_damping
     joints = [self.model.joint(f"{slot}_{side}_finger") for side in ("left", "right")]
     for joint, sign in zip(joints, (1.0, -1.0), strict=True):
       wanted = sorted(sign * angle for angle in (FINGER_SHUT, FINGER_OPEN))

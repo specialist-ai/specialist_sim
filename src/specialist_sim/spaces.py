@@ -28,21 +28,23 @@ __all__ = [
   "ACTION_LOW",
   "FINGER_HIGH",
   "FINGER_LOW",
+  "FINGER_OPEN",
+  "FINGER_SHUT",
   "GRIPPERS",
   "HORIZON",
-  "IMAGE_SHAPE",
   "MASK_RADIUS",
   "PER_HAND",
   "STATE_HIGH",
   "STATE_LOW",
   "F_STEP",
+  "gripper_from_opening",
   "gym_spaces",
+  "opening_from_gripper",
 ]
 
 GRIPPERS = ("left_gripper", "right_gripper")
 """The hands, named for the operator's side each one is. Every body a gripper
 owns carries its name as a prefix, and so does the image it sees."""
-IMAGE_SHAPE = (240, 240, 3)
 MASK_RADIUS = 0.5
 """How much of the frame's width the observation keeps, as a radius from its
 centre. The recorded observations are blanked outside the same disc, and the
@@ -57,6 +59,23 @@ rate a corpus records a hand at."""
 FINGER_LOW = -0.261799
 FINGER_HIGH = 0.698132
 """How far the finger joint travels, which is what an opening names."""
+FINGER_SHUT = np.radians(-9.1175)
+"""The angle at which the pads meet, which a gripper command of zero asks for."""
+FINGER_OPEN = np.radians(40.0)
+"""The joint's open limit, which a gripper command of one asks for."""
+
+
+def gripper_from_opening(opening: float) -> float:
+  """The joint angle an opening asks for, saturating at shut and open."""
+  span = float(np.clip(opening, 0.0, 1.0))
+  return float(FINGER_SHUT + span * (FINGER_OPEN - FINGER_SHUT))
+
+
+def opening_from_gripper(angle: float) -> float:
+  """The opening an angle stands for, saturating at shut and open."""
+  return float(np.clip((angle - FINGER_SHUT) / (FINGER_OPEN - FINGER_SHUT), 0.0, 1.0))
+
+
 HORIZON = 16
 """How many poses a trajectory names."""
 
@@ -74,7 +93,7 @@ ACTION_HIGH: Float32Array = np.tile(STATE_HIGH, (HORIZON, 1))
 
 
 def gym_spaces(
-  image_shape: tuple[int, int, int] = IMAGE_SHAPE, rows: int = 10
+  image_shape: tuple[int, int, int] = (240, 240, 3), rows: int = 10
 ) -> tuple[Any, Any]:
   """The observation and action spaces as Gymnasium objects.
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import mujoco
 import numpy as np
 
 from specialist_sim.scene import Scene
@@ -29,8 +30,8 @@ class TaskCfg:
 
 
 class PickPlace:
-  def __init__(self, scene: Scene, cfg: TaskCfg):
-    self.scene, self.cfg = scene, cfg
+  def __init__(self, scene: Scene, data: mujoco.MjData, cfg: TaskCfg):
+    self.scene, self.data, self.cfg = scene, data, cfg
     self._settled_for = 0
     self._succeeded = False
     self._disturbed = False
@@ -53,7 +54,7 @@ class PickPlace:
   def info(self) -> dict[str, Any]:
     """What the cube is doing, as both reset and step report it."""
     scene, cfg = self.scene, self.cfg
-    data, cube = scene.data, scene.cube
+    data, cube = self.data, scene.cube
     position = data.xpos[cube.body]
     velocity = data.cvel[cube.body]
     upright = float(np.abs(data.xmat[cube.body].reshape(3, 3)[2]).max())
@@ -80,6 +81,6 @@ class PickPlace:
 
   def _held(self) -> bool:
     """Whether a pad and the cube share a contact."""
-    pairs = self.scene.data.contact.geom[: self.scene.data.ncon]
+    pairs = self.data.contact.geom[: self.data.ncon]
     touching = pairs[(pairs == self.scene.cube.geom).any(axis=1)]
-    return bool(np.isin(touching, list(self.scene.pads)).any())
+    return bool(np.isin(touching, self.scene.pads).any())

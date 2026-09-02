@@ -7,17 +7,19 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim import pose as se3
-from specialist_sim.action import FINGER_SHUT, gripper_from_opening, hold
+from specialist_sim.action import hold
 from specialist_sim.observation import flat_row
 from specialist_sim.randomise import HOME_ROTATION, place_cube
 from specialist_sim.spaces import (
   ACTION_HIGH,
   ACTION_LOW,
+  FINGER_SHUT,
   GRIPPERS,
   HORIZON,
   PER_HAND,
   STATE_HIGH,
   STATE_LOW,
+  gripper_from_opening,
 )
 from specialist_sim.task import TaskCfg
 
@@ -113,7 +115,7 @@ def test_a_settled_cube_on_the_tape_pays_once() -> None:
   action = flat_row(obs).astype(np.float64)
   # The cube counts as placed only once it has been off the tape.
   env.step(hold(action))
-  place_cube(env.scene, env.scene.tape)
+  place_cube(env.scene, env.scene.data, env.scene.tape)
   rewards, terminations = [], []
   for _ in range(TaskCfg().settle_steps + 3):
     _, reward, terminated, _, info = env.step(hold(action))
@@ -156,7 +158,7 @@ def test_the_tracker_passes_through_every_pose_it_tracks() -> None:
   commanded = hold(flat_row(obs))
   commanded[:, 2] += 0.02 * np.arange(1, HORIZON + 1)
   hands.process(commanded)
-  ramp = hands._ramp_position[:, 0, 2]
+  ramp = hands._ramp_position[0, :, 0, 2]
   for leg in range(hands.tracked):
     assert ramp[(leg + 1) * hands.span - 1] == pytest.approx(commanded[leg, 2])
   assert (np.diff(ramp) > 0).all(), "the setpoint jumped rather than ramped"
@@ -186,6 +188,32 @@ def test_a_plan_turns_inside_one_control_step() -> None:
   commanded = hold(flat_row(obs))
   commanded[:, 2] += 0.05 * np.array([1.0, 2.0, 1.0, 0.0] * (HORIZON // 4))
   hands.process(commanded)
-  ramp = hands._ramp_position[:, 0, 2]
+  ramp = hands._ramp_position[0, :, 0, 2]
   rising = np.diff(ramp) > 0
   assert rising.any() and not rising.all(), "the setpoint only went one way"
+
+
+def test_a_grasp_in_one_world_is_not_credited_to_its_neighbours() -> None:
+  """Contacts are per world, so only the grasping world reports a held cube."""
+  env = PickPlaceEnv(PickPlaceCfg(max_steps=400), worlds=2)
+  obs, info = env.reset(seeds=[0, 0])
+  cube = np.asarray(info["cube_pos"][1], np.float64)
+  hand = _nearest_hand(env, cube)
+  at = hand * PER_HAND
+  held = HOME_ROTATION[hand]
+  over = cube - held @ env.scene.grasp
+  grasping = flat_row(obs, world=1).astype(np.float64).copy()
+  grasping[at + 3 : at + 7] = se3.wxyz(held)
+  for position, grip, seconds in (
+    (over + (0.0, 0.0, 0.10), CLEARING, 0.9),
+    (over, CLEARING, 1.2),
+    (over, FINGER_SHUT, 1.0),
+    (over + (0.0, 0.0, 0.20), FINGER_SHUT, 1.5),
+  ):
+    grasping[at : at + 3], grasping[at + 7] = position, grip
+    for _ in range(round(seconds * env.cfg.control_hz)):
+      idle = hold(flat_row(obs, world=0))
+      obs, _, _, _, info = env.step(np.stack([idle, hold(grasping)]))
+  lifted = env.datas[1].xpos[env.scene.cube.body][2] - env.scene.cube.rest
+  assert lifted > 0.05, f"the cube only rose {lifted * 1000:.1f} mm"
+  assert bool(info["held"][1]) and not bool(info["held"][0])

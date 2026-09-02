@@ -45,11 +45,6 @@ __all__ = [
 REST = np.array([1.0, 0.0, 0.0, 0.0])
 """The quaternion that names no turn."""
 
-FINGER_SHUT = np.radians(-9.1175)
-"""The angle at which the pads meet, which a gripper command of zero asks for."""
-FINGER_OPEN = np.radians(40.0)
-"""The joint's open limit, which a gripper command of one asks for."""
-
 
 @dataclass(frozen=True)
 class ActionCfg:
@@ -74,17 +69,6 @@ def turn(quaternion: Float64Array) -> Float64Array:
   return out
 
 
-def gripper_from_opening(opening: float) -> float:
-  """The joint angle an opening asks for, saturating at shut and open."""
-  span = float(np.clip(opening, 0.0, 1.0))
-  return float(FINGER_SHUT + span * (FINGER_OPEN - FINGER_SHUT))
-
-
-def opening_from_gripper(angle: float) -> float:
-  """The opening an angle stands for, saturating at shut and open."""
-  return float(np.clip((angle - FINGER_SHUT) / (FINGER_OPEN - FINGER_SHUT), 0.0, 1.0))
-
-
 def hold(state: Float64Array) -> Float64Array:
   """A trajectory that asks for one pose across the whole horizon."""
   return np.tile(np.asarray(state, np.float64), (HORIZON, 1))
@@ -99,8 +83,9 @@ class Hands:
     substeps: int,
     control_dt: float,
     cfg: ActionCfg,
+    worlds: int = 1,
   ):
-    self.cfg, self.substeps = cfg, substeps
+    self.cfg, self.substeps, self.worlds = cfg, substeps, worlds
     self._rig = [grip.rig for grip in grippers]
     self._servos = [list(grip.servos) for grip in grippers]
     self._finger = [grip.fingers[0] for grip in grippers]
@@ -118,112 +103,127 @@ class Hands:
       raise ValueError("a pose must span a whole number of physics steps")
     self.span = substeps // self.tracked
     """How many physics steps one pose spans."""
-    self._within = np.arange(1, self.span + 1) / self.span
+    self._blend = np.arange(1, self.span + 1) / self.span
     hands = len(GRIPPERS)
-    self._position = np.zeros((hands, 3))
-    self._quaternion = np.zeros((hands, 4))
-    self._opening = np.zeros(hands)
-    self._ramp_position = np.zeros((substeps, hands, 3))
-    self._ramp_rotation = np.zeros((substeps, hands, 3, 3))
-    self._ramp_opening = np.zeros((substeps, hands))
-    self._ramp_twist = np.zeros((substeps, hands, 6))
+    self._position = np.zeros((worlds, hands, 3))
+    self._quaternion = np.zeros((worlds, hands, 4))
+    self._opening = np.zeros((worlds, hands))
+    self._ramp_position = np.zeros((worlds, substeps, hands, 3))
+    self._ramp_quaternion = np.zeros((worlds, substeps, hands, 4))
+    self._ramp_opening = np.zeros((worlds, substeps, hands))
+    self._ramp_twist = np.zeros((worlds, substeps, hands, 6))
+    """Each substep's feedforward: linear velocity, then angular velocity
+    already carried into the world frame of its setpoint."""
+    self._rigs = np.asarray(self._rig, np.int64)
+    qadr = np.asarray([grip.qpos for grip in grippers], np.int64)
+    self._at_position = qadr[:, None] + np.arange(3)
+    self._at_quaternion = qadr[:, None] + np.arange(3, 7)
+    self._servo_left = np.asarray([servos[0] for servos in self._servos], np.int64)
+    self._servo_right = np.asarray([servos[1] for servos in self._servos], np.int64)
 
-  def reset(self, data: mujoco.MjData) -> None:
-    """Hold every hand exactly where the scene put it."""
-    for hand, body in enumerate(self._rig):
-      self._position[hand] = data.xpos[body]
-      self._quaternion[hand] = se3.wxyz(data.xmat[body].reshape(3, 3))
-      self._opening[hand] = float(data.qpos[self._finger[hand]])
-      self._ramp_position[:, hand] = self._position[hand]
-      self._ramp_rotation[:, hand] = data.xmat[body].reshape(3, 3)
-      self._ramp_opening[:, hand] = self._opening[hand]
-    self._ramp_twist[:] = 0.0
-    for hand in range(len(GRIPPERS)):
-      self._command_fingers(data, hand, self._opening[hand])
+  def reset(
+    self, datas: Sequence[mujoco.MjData], worlds: Sequence[int] | None = None
+  ) -> None:
+    """Hold the named worlds' hands exactly where their scenes put them."""
+    for world in range(len(datas)) if worlds is None else worlds:
+      data = datas[world]
+      for hand, body in enumerate(self._rig):
+        self._position[world, hand] = data.xpos[body]
+        self._quaternion[world, hand] = se3.wxyz(data.xmat[body].reshape(3, 3))
+        self._opening[world, hand] = float(data.qpos[self._finger[hand]])
+        self._ramp_position[world, :, hand] = self._position[world, hand]
+        self._ramp_quaternion[world, :, hand] = self._quaternion[world, hand]
+        self._ramp_opening[world, :, hand] = self._opening[world, hand]
+      self._ramp_twist[world] = 0.0
 
   def process(self, action: Float64Array) -> None:
-    """Resample the leading poses onto the substeps that track them."""
-    trajectory = self._checked(action)
-    for hand in range(len(GRIPPERS)):
-      legs = trajectory[: self.tracked, hand]
-      position = np.concatenate([self._position[hand][None], legs[:, :3]])
-      quaternion = np.concatenate([self._quaternion[hand][None], turn(legs[:, 3:7])])
-      opening = np.concatenate([self._opening[hand][None], legs[:, 7]])
-      for leg in range(self.tracked):
-        across = slice(leg * self.span, (leg + 1) * self.span)
-        step, blend = position[leg + 1] - position[leg], self._within
-        self._ramp_position[across, hand] = position[leg] + np.outer(blend, step)
-        self._ramp_rotation[across, hand] = slerp(
-          quaternion[leg], quaternion[leg + 1], blend
-        )
-        self._ramp_opening[across, hand] = opening[leg] + blend * (
-          opening[leg + 1] - opening[leg]
-        )
-        self._ramp_twist[across, hand] = self._twist(
-          step, quaternion[leg], quaternion[leg + 1]
-        )
-      self._position[hand] = position[-1]
-      self._quaternion[hand] = quaternion[-1]
-      self._opening[hand] = opening[-1]
+    """Resample the leading poses onto the substeps that track them.
 
-  def apply(self, data: mujoco.MjData, substep: int) -> None:
-    for hand, body in enumerate(self._rig):
-      self._command_fingers(data, hand, float(self._ramp_opening[substep, hand]))
-      self._pull(
-        data,
-        body,
-        self._ramp_position[substep, hand],
-        self._ramp_rotation[substep, hand],
-        self._ramp_twist[substep, hand],
-      )
+    A ramp is laid once per control step, so it is built world by world; the
+    wrench that reads it runs every substep and is not.
+    """
+    trajectory = self._checked(action)
+    for world in range(self.worlds):
+      for hand in range(len(GRIPPERS)):
+        legs = trajectory[world, : self.tracked, hand]
+        held = self._position[world, hand][None]
+        position = np.concatenate([held, legs[:, :3]])
+        quaternion = np.concatenate(
+          [self._quaternion[world, hand][None], turn(legs[:, 3:7])]
+        )
+        opening = np.concatenate([self._opening[world, hand][None], legs[:, 7]])
+        for leg in range(self.tracked):
+          across = slice(leg * self.span, (leg + 1) * self.span)
+          step, blend = position[leg + 1] - position[leg], self._blend
+          spin = np.empty(3)
+          mujoco.mju_subQuat(spin, quaternion[leg + 1], quaternion[leg])
+          self._ramp_position[world, across, hand] = position[leg] + np.outer(
+            blend, step
+          )
+          self._ramp_quaternion[world, across, hand] = slerp(
+            quaternion[leg], spin, blend
+          )
+          self._ramp_opening[world, across, hand] = opening[leg] + blend * (
+            opening[leg + 1] - opening[leg]
+          )
+          twist = self._twist(step, spin)
+          self._ramp_twist[world, across, hand, :3] = twist[:3]
+          self._ramp_twist[world, across, hand, 3:] = _rotated(
+            self._ramp_quaternion[world, across, hand], twist[None, 3:]
+          )
+        self._position[world, hand] = position[-1]
+        self._quaternion[world, hand] = quaternion[-1]
+        self._opening[world, hand] = opening[-1]
+
+  def command(
+    self, qpos: Float64Array, substep: int, ctrl: Float64Array, xfrc: Float64Array
+  ) -> None:
+    """Write the servo angles and the wrench every world wants for one substep.
+
+    A rig is a free body, so the pose the impedance answers to is its joint
+    coordinates: no forward pass stands between the state and the wrench. Only
+    the rig and servo entries are ever written, so the rest of the buffers stay
+    the zeros they were built with.
+    """
+    cfg = self.cfg
+    here = qpos[:, self._at_position]
+    now = qpos[:, self._at_quaternion]
+    want = self._ramp_position[:, substep]
+    facing = self._ramp_quaternion[:, substep]
+    twist = self._ramp_twist[:, substep]
+    force = cfg.stiffness * (want - here) + cfg.damping * twist[..., :3]
+    torque = cfg.rotational_stiffness * _apart(facing, now) + (
+      cfg.rotational_damping * twist[..., 3:]
+    )
+    xfrc[:, self._rigs, :3] = force
+    xfrc[:, self._rigs, 3:] = torque
+    angle = self._ramp_opening[:, substep]
+    ctrl[:, self._servo_left] = angle
+    ctrl[:, self._servo_right] = -angle
 
   def _checked(self, action: Float64Array) -> Float64Array:
+    wanted = (self.worlds, *ACTION_LOW.shape)
     trajectory = np.asarray(action, np.float64)
-    if trajectory.shape != ACTION_LOW.shape:
-      raise ValueError(
-        f"an action has shape {ACTION_LOW.shape}, not {trajectory.shape}"
-      )
+    if self.worlds == 1 and trajectory.shape == ACTION_LOW.shape:
+      trajectory = trajectory[None]
+    if trajectory.shape != wanted:
+      raise ValueError(f"an action has shape {wanted}, not {trajectory.shape}")
     if not np.isfinite(trajectory).all():
       raise ValueError("an action must be finite")
     clipped = np.clip(trajectory, ACTION_LOW, ACTION_HIGH)
-    return clipped.reshape(HORIZON, len(GRIPPERS), PER_HAND)
+    return clipped.reshape(self.worlds, HORIZON, len(GRIPPERS), PER_HAND)
 
-  def _twist(
-    self, step: Float64Array, turn_from: Float64Array, turn_to: Float64Array
-  ) -> Float64Array:
+  def _twist(self, step: Float64Array, spin: Float64Array) -> Float64Array:
     """The velocity one leg of the trajectory asks for, capped.
 
     It exists to cancel the free body's damping, so a cap bounds how much of it
     is cancelled without touching where the setpoint is.
     """
-    turn = np.empty(3)
-    mujoco.mju_subQuat(turn, turn_to, turn_from)
-    rate = ACTION_HZ
     return np.concatenate(
       [
-        _capped(step * rate, self.cfg.max_speed),
-        _capped(turn * rate, self.cfg.max_turn),
+        _capped(step * ACTION_HZ, self.cfg.max_speed),
+        _capped(spin * ACTION_HZ, self.cfg.max_turn),
       ]
-    )
-
-  def _command_fingers(self, data: mujoco.MjData, hand: int, angle: float) -> None:
-    data.ctrl[self._servos[hand]] = (angle, -angle)
-
-  def _pull(
-    self,
-    data: mujoco.MjData,
-    body: int,
-    position: Float64Array,
-    rotation: Float64Array,
-    twist: Float64Array,
-  ) -> None:
-    cfg = self.cfg
-    turn = se3.log(rotation @ data.xmat[body].reshape(3, 3).T)
-    data.xfrc_applied[body, :3] = cfg.stiffness * (position - data.xpos[body]) + (
-      cfg.damping * twist[:3]
-    )
-    data.xfrc_applied[body, 3:] = cfg.rotational_stiffness * turn + (
-      cfg.rotational_damping * (rotation @ twist[3:])
     )
 
 
@@ -232,15 +232,52 @@ def _capped(vector: Float64Array, limit: float) -> Float64Array:
   return vector * (limit / norm) if norm > limit else vector
 
 
-def slerp(start: Float64Array, end: Float64Array, blend: Float64Array) -> Float64Array:
-  """Rotation matrices along the geodesic from ``start`` to ``end``."""
-  turn = np.empty(3)
-  mujoco.mju_subQuat(turn, end, start)
-  out = np.empty((len(blend), 3, 3))
-  matrix = np.empty(9)
-  for index, fraction in enumerate(blend):
-    step = start.copy()
-    mujoco.mju_quatIntegrate(step, turn, float(fraction))
-    mujoco.mju_quat2Mat(matrix, step)
-    out[index] = matrix.reshape(3, 3)
+def slerp(start: Float64Array, spin: Float64Array, blend: Float64Array) -> Float64Array:
+  """Quaternions along the geodesic that ``spin`` names out of ``start``."""
+  half = np.outer(blend, spin) * 0.5
+  angle = np.linalg.norm(half, axis=1, keepdims=True)
+  axis = np.where(angle > 1e-12, half / np.where(angle > 0.0, angle, 1.0), half)
+  ahead = np.concatenate([np.cos(angle), np.sin(angle) * axis], axis=1)
+  return _joined(start[None, :], ahead)
+
+
+def _cross(a: Float64Array, b: Float64Array) -> Float64Array:
+  """``a × b`` over any matching leading axes, without numpy's axis bookkeeping."""
+  out = np.empty(np.broadcast_shapes(a.shape, b.shape))
+  out[..., 0] = a[..., 1] * b[..., 2] - a[..., 2] * b[..., 1]
+  out[..., 1] = a[..., 2] * b[..., 0] - a[..., 0] * b[..., 2]
+  out[..., 2] = a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+  return out
+
+
+def _joined(first: Float64Array, then: Float64Array) -> Float64Array:
+  """The quaternion product ``first ⊗ then``, over any matching leading axes."""
+  w1, v1 = first[..., :1], first[..., 1:]
+  w2, v2 = then[..., :1], then[..., 1:]
+  w = w1 * w2 - np.sum(v1 * v2, axis=-1, keepdims=True)
+  v = w1 * v2 + w2 * v1 + _cross(v1, v2)
+  return np.concatenate([w, v], axis=-1)
+
+
+def _apart(want: Float64Array, here: Float64Array) -> Float64Array:
+  """The rotation vector carrying each ``here`` onto its ``want``, stable
+  everywhere a rotation is: the angle comes from ``atan2``, so a half turn is
+  as sound as no turn at all."""
+  conj = np.concatenate([here[..., :1], -here[..., 1:]], axis=-1)
+  rel = _joined(want, conj)
+  rel = np.where(rel[..., :1] < 0.0, -rel, rel)
+  spin = rel[..., 1:]
+  swing = np.linalg.norm(spin, axis=-1, keepdims=True)
+  angle = 2.0 * np.arctan2(swing, rel[..., :1])
+  # As the swing vanishes the ratio tends to two, whatever the axis was.
+  return np.where(
+    swing > 1e-12, angle * spin / np.where(swing > 0.0, swing, 1.0), 2.0 * spin
+  )
+
+
+def _rotated(quaternion: Float64Array, vector: Float64Array) -> Float64Array:
+  """Each ``vector`` carried through its ``quaternion``."""
+  w, axis = quaternion[..., :1], quaternion[..., 1:]
+  lift = _cross(axis, vector)
+  out: Float64Array = vector + 2.0 * (w * lift + _cross(axis, lift))
   return out
