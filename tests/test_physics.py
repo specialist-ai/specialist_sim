@@ -157,7 +157,7 @@ def test_the_tracker_passes_through_every_pose_it_tracks() -> None:
   hands = env.hands
   commanded = hold(flat_row(obs))
   commanded[:, 2] += 0.02 * np.arange(1, HORIZON + 1)
-  hands.process(commanded)
+  hands.process(commanded, (0, 1))
   ramp = hands._ramp_position[0, :, 0, 2]
   for leg in range(hands.tracked):
     assert ramp[(leg + 1) * hands.span - 1] == pytest.approx(commanded[leg, 2])
@@ -187,7 +187,7 @@ def test_a_plan_turns_inside_one_control_step() -> None:
   hands = env.hands
   commanded = hold(flat_row(obs))
   commanded[:, 2] += 0.05 * np.array([1.0, 2.0, 1.0, 0.0] * (HORIZON // 4))
-  hands.process(commanded)
+  hands.process(commanded, (0, 1))
   ramp = hands._ramp_position[0, :, 0, 2]
   rising = np.diff(ramp) > 0
   assert rising.any() and not rising.all(), "the setpoint only went one way"

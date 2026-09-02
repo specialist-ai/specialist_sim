@@ -30,12 +30,14 @@ LIFT = 0.010
 LIFTS = (0.006, 0.008, 0.010, 0.012)
 """The lifts a summary also reports clean at, since the score turns on one."""
 
-PROTOCOL = 2
+PROTOCOL = 3
 """The benchmark's revision, bumped by any change that moves an outcome for a
 fixed seed, so a logged score says which protocol it came from.
 
 1. The bench as first landed: the cube's start drawn from the episode's own stream.
 2. The start drawn from the seed's child stream, untangled from the hands' jitter.
+3. Every start drawn from the episode's own stream by the task, the cube turned
+   off the tape as on it; an undriven hand held at its commanded setpoint.
 """
 
 

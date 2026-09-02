@@ -6,7 +6,7 @@ import pytest
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
 from specialist_sim.observation import flat_row
-from specialist_sim.randomise import Region
+from specialist_sim.randomise import Kicked, OnTape, Region
 from specialist_sim.spaces import GRIPPERS, HORIZON, PER_HAND
 from specialist_sim.task import (
   BIMANUAL,
@@ -19,7 +19,6 @@ from specialist_sim.task import (
 
 PATCH = Region(vertices=((0.30, -0.14), (0.62, -0.14), (0.62, 0.10), (0.30, 0.10)))
 """A patch of table, off the tape on the right hand's side and beyond."""
-SMALL = PickPlaceCfg(image_size=64, max_steps=10**6)
 
 
 def _env(task: Task, worlds: int = 1) -> PickPlaceEnv:
@@ -29,21 +28,27 @@ def _env(task: Task, worlds: int = 1) -> PickPlaceEnv:
 
 def test_a_one_hand_task_reproduces_the_two_hand_run_that_held_the_other() -> None:
   """The controlled experiment: driving the right hand alone, with the env
-  holding the left where it was last seen, is bitwise the run that drove both
-  and asked the left to hold itself — which is what the bench did before."""
-  both = _env(Task(driven=GRIPPERS, start=PATCH, goal=PlacedOnTape()))
+  holding the left where it was sent, is bitwise the run that drove both and
+  asked the left for its reset pose every step."""
+  both = _env(Task(driven=GRIPPERS, start=Kicked(PATCH), goal=PlacedOnTape()))
   right = _env(right_task(PATCH))
   obs_both, _ = both.reset(seed=11)
   obs_right, _ = right.reset(seed=11)
   assert np.array_equal(
     obs_both["right_gripper"]["pose"], obs_right["right_gripper"]["pose"]
   )
+  left = both.scene.grippers[0]
+  sent = np.concatenate(
+    [
+      both.datas[0].qpos[left.qpos : left.qpos + 7],
+      both.datas[0].qpos[[left.fingers[0]]],
+    ]
+  )
   for step in range(20):
     plan = hold(flat_row(obs_right))
     plan[:, 0] += 0.002 * (step + 1)
     plan[:, 7] -= 0.01 * (step + 1)
-    whole = hold(flat_row(obs_both))
-    whole[:, PER_HAND:] = plan
+    whole = np.concatenate([np.tile(sent, (HORIZON, 1)), plan], axis=1)
     obs_both, *_ = both.step(whole)
     obs_right, *_ = right.step(plan)
     for key in ("pose", "opening", "image"):
@@ -107,10 +112,34 @@ def test_a_kick_succeeds_when_the_cube_rests_in_the_picking_region() -> None:
 
 def test_a_task_names_hands_the_rig_has() -> None:
   with pytest.raises(ValueError, match="drives some of"):
-    Task(driven=("left_hand",), start=None, goal=PlacedOnTape())
+    Task(driven=("left_hand",), start=OnTape(), goal=PlacedOnTape())
   with pytest.raises(ValueError, match="drives some of"):
-    Task(driven=(), start=None, goal=PlacedOnTape())
+    Task(driven=(), start=OnTape(), goal=PlacedOnTape())
   with pytest.raises(ValueError, match="in that order"):
-    Task(driven=tuple(reversed(GRIPPERS)), start=None, goal=PlacedOnTape())
+    Task(driven=tuple(reversed(GRIPPERS)), start=OnTape(), goal=PlacedOnTape())
   assert BIMANUAL.driven == GRIPPERS
   assert isinstance(left_task(PATCH).goal, RestingIn)
+
+
+def test_a_task_may_see_a_lens_it_does_not_drive() -> None:
+  env = _env(
+    Task(("right_gripper",), Kicked(PATCH), PlacedOnTape(), seen=("left_gripper",))
+  )
+  obs, _ = env.reset(seed=0)
+  assert set(obs) == {"step", "left_gripper", "right_gripper"}
+  assert set(obs["left_gripper"]) == {"image", "image_step"}
+  assert set(obs["right_gripper"]) == {"pose", "opening", "image", "image_step"}
+  assert flat_row(obs).shape == (PER_HAND,)
+  assert env.observation_space["left_gripper"].keys() == {"image", "image_step"}
+
+
+def test_the_idle_hand_returns_to_where_it_was_sent_after_a_bump() -> None:
+  env = _env(right_task(PATCH))
+  obs, _ = env.reset(seed=5)
+  left = env.scene.grippers[0]
+  sent = env.datas[0].qpos[left.qpos : left.qpos + 3].copy()
+  env.datas[0].qpos[left.qpos] += 0.01
+  for _ in range(30):
+    obs, *_ = env.step(hold(flat_row(obs)))
+  back = np.linalg.norm(env.datas[0].qpos[left.qpos : left.qpos + 3] - sent)
+  assert back < 0.002, f"the bumped hand stayed {back * 1e3:.1f} mm away"

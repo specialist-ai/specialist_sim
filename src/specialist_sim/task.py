@@ -1,4 +1,4 @@
-"""A task: the hands a policy drives, where the cube starts, and what ends it.
+"""A task: the hands a policy drives, where the episode opens, and what ends it.
 
 The rig is always whole. Hands a task does not drive are reset, held in the
 air and seen by every lens, but absent from the observation and the action.
@@ -12,25 +12,29 @@ from typing import Any, Protocol
 import mujoco
 import numpy as np
 
-from specialist_sim.randomise import Region, Start
+from specialist_sim.arrays import Float64Array
+from specialist_sim.randomise import Kicked, OnTape, Region, Start
 from specialist_sim.scene import Scene
 from specialist_sim.spaces import GRIPPERS
 
 __all__ = [
   "BIMANUAL",
   "Goal",
-  "PickPlace",
+  "Judge",
   "PlacedOnTape",
   "RestingIn",
   "Task",
   "TaskCfg",
   "left_task",
   "right_task",
+  "task_for",
 ]
 
 
 @dataclass(frozen=True)
 class TaskCfg:
+  """The thresholds the cube's report is judged against."""
+
   place_tolerance: float = 0.010
   rest_height: float = 0.005
   rest_speed: float = 0.02
@@ -41,20 +45,15 @@ class TaskCfg:
 
 
 class Goal(Protocol):
-  @property
-  def cfg(self) -> TaskCfg: ...
-
-  def reached(self, report: dict[str, Any], disturbed: bool) -> bool: ...
+  def reached(self, report: dict[str, Any]) -> bool: ...
 
 
 @dataclass(frozen=True)
 class PlacedOnTape:
   """The cube back on the tape, at rest and let go of, having been off it."""
 
-  cfg: TaskCfg = field(default_factory=TaskCfg)
-
-  def reached(self, report: dict[str, Any], disturbed: bool) -> bool:
-    return bool(disturbed and report["settled"])
+  def reached(self, report: dict[str, Any]) -> bool:
+    return bool(report["displaced"] and report["settled"])
 
 
 @dataclass(frozen=True)
@@ -62,9 +61,8 @@ class RestingIn:
   """The cube at rest off the tape, inside the region a pick begins in."""
 
   region: Region
-  cfg: TaskCfg = field(default_factory=TaskCfg)
 
-  def reached(self, report: dict[str, Any], disturbed: bool) -> bool:
+  def reached(self, report: dict[str, Any]) -> bool:
     return bool(
       report["resting"]
       and not report["on_target"]
@@ -76,46 +74,63 @@ class RestingIn:
 @dataclass(frozen=True)
 class Task:
   driven: tuple[str, ...]
-  start: Start | None
-  """Where the cube opens off the tape; ``None`` opens it on the tape."""
+  start: Start
   goal: Goal
+  seen: tuple[str, ...] = ()
+  """Lenses the observation carries beyond the driven hands' own."""
+  cfg: TaskCfg = field(default_factory=TaskCfg)
 
   def __post_init__(self) -> None:
-    order = tuple(slot for slot in GRIPPERS if slot in self.driven)
-    if not self.driven or order != self.driven:
-      raise ValueError(
-        f"a task drives some of {GRIPPERS}, in that order, not {self.driven}"
-      )
+    for name, hands in (("drives", self.driven), ("sees", self.seen)):
+      order = tuple(slot for slot in GRIPPERS if slot in hands)
+      if (name == "drives" and not hands) or order != hands:
+        raise ValueError(
+          f"a task {name} some of {GRIPPERS}, in that order, not {hands}"
+        )
+
+  @property
+  def lenses(self) -> tuple[str, ...]:
+    return tuple(slot for slot in GRIPPERS if slot in self.driven or slot in self.seen)
 
 
-BIMANUAL = Task(GRIPPERS, None, PlacedOnTape())
+BIMANUAL = Task(GRIPPERS, OnTape(), PlacedOnTape())
 
 
 def right_task(region: Region) -> Task:
-  return Task((GRIPPERS[1],), region, PlacedOnTape())
+  return Task((GRIPPERS[1],), Kicked(region), PlacedOnTape())
 
 
 def left_task(region: Region) -> Task:
-  return Task((GRIPPERS[0],), None, RestingIn(region))
+  return Task((GRIPPERS[0],), OnTape(), RestingIn(region))
 
 
-class PickPlace:
+def task_for(driven: tuple[str, ...], region: Region) -> Task:
+  """The named task a policy driving ``driven`` is evaluated on."""
+  named = {
+    GRIPPERS: BIMANUAL,
+    (GRIPPERS[1],): right_task(region),
+    (GRIPPERS[0],): left_task(region),
+  }
+  if tuple(driven) not in named:
+    raise ValueError(f"no task drives {driven}; the tasks drive {list(named)}")
+  return named[tuple(driven)]
+
+
+class Judge:
   """One world's judge: the goal, latched once it has held for ``settle_steps``."""
 
-  def __init__(self, scene: Scene, data: mujoco.MjData, goal: Goal):
-    self.scene, self.data, self.goal = scene, data, goal
-    self.cfg = goal.cfg
+  def __init__(self, scene: Scene, data: mujoco.MjData, task: Task):
+    self.scene, self.data, self.goal, self.cfg = scene, data, task.goal, task.cfg
     self.reset()
 
   def reset(self) -> None:
     self._settled_for = 0
     self._succeeded = False
-    self._disturbed = False
+    self._displaced = False
 
   def evaluate(self) -> tuple[float, bool, dict[str, Any]]:
     report = self.info()
-    self._disturbed |= not report["on_target"]
-    settled = self.goal.reached(report, self._disturbed)
+    settled = self.goal.reached(report)
     self._settled_for = self._settled_for + 1 if settled else 0
     won = self._settled_for >= self.cfg.settle_steps and not self._succeeded
     self._succeeded |= won
@@ -126,15 +141,18 @@ class PickPlace:
     """What the cube is doing, as both reset and step report it."""
     scene, cfg = self.scene, self.cfg
     data, cube = self.data, scene.cube
-    position = data.xpos[cube.body]
+    position: Float64Array = data.xpos[cube.body]
     velocity = data.cvel[cube.body]
     upright = float(np.abs(data.xmat[cube.body].reshape(3, 3)[2]).max())
+    on_target = bool(
+      abs(position[0] - scene.tape[0]) <= scene.tape_half[0] + cfg.place_tolerance
+      and abs(position[1] - scene.tape[1]) <= scene.tape_half[1] + cfg.place_tolerance
+    )
+    self._displaced |= not on_target
     report = {
       "is_success": self._succeeded,
-      "on_target": bool(
-        abs(position[0] - scene.tape[0]) <= scene.tape_half[0] + cfg.place_tolerance
-        and abs(position[1] - scene.tape[1]) <= scene.tape_half[1] + cfg.place_tolerance
-      ),
+      "on_target": on_target,
+      "displaced": self._displaced,
       "resting": bool(
         abs(position[2] - cube.rest) < cfg.rest_height
         and np.linalg.norm(velocity[3:]) < cfg.rest_speed
@@ -145,9 +163,7 @@ class PickPlace:
       "dropped": bool(position[2] < scene.table_top - cfg.drop_depth),
       "cube_pos": np.asarray(position, np.float32).copy(),
     }
-    report["settled"] = bool(
-      report["on_target"] and report["resting"] and not report["held"]
-    )
+    report["settled"] = bool(on_target and report["resting"] and not report["held"])
     return report
 
   def _held(self) -> bool:

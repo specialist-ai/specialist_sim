@@ -10,9 +10,11 @@ from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
 from specialist_sim.eval import LIFT, LIFTS, PROTOCOL, Outcome, summary, sweep
 from specialist_sim.observation import flat_rows
-from specialist_sim.randomise import Region, Scatter, scattered
+from specialist_sim.randomise import Kicked, Region
 from specialist_sim.spaces import GRIPPERS
 from specialist_sim.task import BIMANUAL, PlacedOnTape, Task, right_task
+
+PATCH = Region(vertices=((0.30, -0.14), (0.62, -0.14), (0.62, 0.10), (0.30, 0.10)))
 
 
 class _Idle:
@@ -29,9 +31,9 @@ class _Idle:
 
 
 def test_a_sweep_scores_every_seed_and_restarts_worlds_alone() -> None:
-  scattered = Task(driven=GRIPPERS, start=Scatter(), goal=PlacedOnTape())
+  kicked = Task(driven=GRIPPERS, start=Kicked(PATCH), goal=PlacedOnTape())
   env = PickPlaceEnv(
-    PickPlaceCfg(image_size=64, max_steps=10**6, task=scattered), worlds=2
+    PickPlaceCfg(image_size=64, max_steps=10**6, task=kicked), worlds=2
   )
   agent = _Idle()
   outcomes = sweep(env, agent, seeds=[3, 4, 5], budget=4)
@@ -58,23 +60,14 @@ def test_a_sweep_refuses_a_budget_the_environment_would_cut_short() -> None:
     sweep(env, _Idle(), seeds=[0], budget=10)
 
 
-def test_a_scattered_start_opens_the_episode_at_the_pick() -> None:
-  starts = Scatter()
-  task = Task(driven=GRIPPERS, start=starts, goal=PlacedOnTape())
+def test_a_kicked_start_opens_the_episode_at_the_pick() -> None:
+  task = Task(driven=GRIPPERS, start=Kicked(PATCH), goal=PlacedOnTape())
   env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, task=task))
-  tape = np.asarray(env.scene.tape)
-  for seed in (0, 1, 2):
-    spot = scattered(env.scene, np.random.default_rng(seed), starts)
-    away = float(np.hypot(*(spot - tape)))
-    assert starts.distance[0] <= away <= starts.distance[1]
-    again = scattered(env.scene, np.random.default_rng(seed), starts)
-    assert np.array_equal(spot, again), "a seed names one start"
   _, info = env.reset(seed=0)
   assert not bool(info["on_target"][0]), "the cube opens off the tape"
-  _, again_info = env.reset(seed=0)
-  assert np.array_equal(info["cube_pos"], again_info["cube_pos"]), (
-    "a seed names one start"
-  )
+  assert PATCH.contains(info["cube_pos"][0, :2])
+  _, again = env.reset(seed=0)
+  assert np.array_equal(info["cube_pos"], again["cube_pos"]), "a seed names one start"
 
 
 def test_an_outcome_names_its_bucket() -> None:
@@ -88,14 +81,13 @@ def test_an_outcome_names_its_bucket() -> None:
 
 def test_a_region_draws_only_inside_its_own_ring() -> None:
   region = Region(vertices=((0.40, -0.10), (0.55, -0.05), (0.52, 0.08), (0.42, 0.06)))
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
   ring = np.asarray(region.vertices)
   edges = np.roll(ring, -1, axis=0) - ring
   for seed in range(20):
-    spot = region.draw(env.scene, np.random.default_rng(seed))
+    spot = region.draw(np.random.default_rng(seed))
     toward = spot - ring
     assert (edges[:, 0] * toward[:, 1] - edges[:, 1] * toward[:, 0] >= 0.0).all()
-    again = region.draw(env.scene, np.random.default_rng(seed))
+    again = region.draw(np.random.default_rng(seed))
     assert np.array_equal(spot, again), "a seed names one start"
 
 
@@ -109,23 +101,11 @@ def test_a_region_refuses_a_ring_that_is_not_one() -> None:
 def test_a_region_never_draws_inside_its_hole() -> None:
   ring = ((0.30, -0.15), (0.65, -0.15), (0.65, 0.15), (0.30, 0.15))
   region = Region(vertices=ring, hole=(0.49, 0.0, 0.08))
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
   for seed in range(200):
-    spot = region.draw(env.scene, np.random.default_rng(seed))
+    spot = region.draw(np.random.default_rng(seed))
     assert np.hypot(spot[0] - 0.49, spot[1]) >= 0.08
   with pytest.raises(ValueError, match="not negative"):
     Region(vertices=ring, hole=(0.49, 0.0, -0.01))
-
-
-def test_a_start_is_not_drawn_from_the_stream_the_hands_are() -> None:
-  """The hands' jitter and the cube's start come from different streams, so
-  the cube does not shadow the hands seed after seed."""
-  starts = Scatter()
-  task = Task(driven=GRIPPERS, start=starts, goal=PlacedOnTape())
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, task=task))
-  _, info = env.reset(seed=7)
-  same_stream = starts.draw(env.scene, np.random.default_rng(7))
-  assert not np.allclose(info["cube_pos"][0, :2], same_stream, atol=1e-6)
 
 
 def test_a_bimanual_reset_is_untouched_by_the_task_machinery() -> None:
@@ -141,4 +121,4 @@ def test_a_bimanual_reset_is_untouched_by_the_task_machinery() -> None:
 def test_the_bench_has_no_start_of_its_own() -> None:
   env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
   with pytest.raises(TypeError):
-    sweep(env, _Idle(), seeds=[0], budget=1, starts=Scatter())  # type: ignore[call-arg]
+    sweep(env, _Idle(), seeds=[0], budget=1, starts=PATCH)  # type: ignore[call-arg]

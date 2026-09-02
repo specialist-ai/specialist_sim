@@ -104,6 +104,7 @@ def gym_spaces(
   image_shape: tuple[int, int, int] = (240, 240, 3),
   rows: int = 10,
   driven: tuple[str, ...] = GRIPPERS,
+  lenses: tuple[str, ...] = GRIPPERS,
 ) -> tuple[Any, Any]:
   """The observation and action spaces as Gymnasium objects.
 
@@ -111,26 +112,33 @@ def gym_spaces(
   each one is. The rows are the robot's own clock: exact, and current as of the
   boundary the step returns at. The image is on the camera's clock, which runs
   behind the robot's, so it is quarantined behind ``image_step``, the row it was
-  captured at. Nothing here reports how far behind that is; a reader subtracts.
+  captured at. A driven hand carries its rows; a lens carries its image; a
+  slot that is both carries both.
   """
   import gymnasium as gym
 
   low, high = STATE_LOW[:PER_HAND], STATE_HIGH[:PER_HAND]
-  hand = gym.spaces.Dict(
-    {
-      "pose": gym.spaces.Box(
-        np.tile(low[:7], (rows, 1)), np.tile(high[:7], (rows, 1)), dtype=np.float32
-      ),
-      "opening": gym.spaces.Box(low[7], high[7], (rows,), np.float32),
-      "image": gym.spaces.Box(0, 255, image_shape, np.uint8),
-      "image_step": gym.spaces.Box(-(2**31), 2**31 - 1, (), np.int64),
-    }
-  )
+  rows_of = {
+    "pose": gym.spaces.Box(
+      np.tile(low[:7], (rows, 1)), np.tile(high[:7], (rows, 1)), dtype=np.float32
+    ),
+    "opening": gym.spaces.Box(low[7], high[7], (rows,), np.float32),
+  }
+  image_of = {
+    "image": gym.spaces.Box(0, 255, image_shape, np.uint8),
+    "image_step": gym.spaces.Box(-(2**31), 2**31 - 1, (), np.int64),
+  }
+  slots: dict[str, Any] = {}
+  for slot in GRIPPERS:
+    fields: dict[str, Any] = {}
+    if slot in driven:
+      fields.update(rows_of)
+    if slot in lenses:
+      fields.update(image_of)
+    if fields:
+      slots[slot] = gym.spaces.Dict(fields)
   observation = gym.spaces.Dict(
-    {
-      "step": gym.spaces.Box(-(2**31), 2**31 - 1, (rows,), np.int64),
-      **{slot: hand for slot in driven},
-    }
+    {"step": gym.spaces.Box(-(2**31), 2**31 - 1, (rows,), np.int64), **slots}
   )
   act_low, act_high = action_bounds(len(driven))
   return observation, gym.spaces.Box(act_low, act_high, dtype=np.float32)

@@ -38,7 +38,7 @@ def flat_rows(observation: dict[str, Any], row: int = -1) -> Float64Array:
         axis=1,
       )
       for slot in GRIPPERS
-      if slot in observation
+      if "pose" in observation.get(slot, {})
     ],
     axis=1,
   ).astype(np.float64)

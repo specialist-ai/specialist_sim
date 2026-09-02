@@ -46,7 +46,7 @@ def test_the_hole_keeps_every_draw_off_the_table_the_corpus_never_picks_from() -
   region = derive(closings(cube, opening, segment), opened(cube, segment), 99.0, 5.0)
   assert region.hole is not None and 0.085 <= region.hole[2] <= 0.09
   for seed in range(100):
-    spot = region.draw(None, np.random.default_rng(seed))  # type: ignore[arg-type]
+    spot = region.draw(np.random.default_rng(seed))
     assert np.hypot(*(spot - tape)) >= region.hole[2]
 
 

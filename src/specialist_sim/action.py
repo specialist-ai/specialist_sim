@@ -20,15 +20,13 @@ from typing import TYPE_CHECKING
 import mujoco
 import numpy as np
 
-from specialist_sim import pose as se3
 from specialist_sim.arrays import Float64Array
 from specialist_sim.spaces import (
-  ACTION_HIGH,
   ACTION_HZ,
-  ACTION_LOW,
   GRIPPERS,
   HORIZON,
   PER_HAND,
+  action_bounds,
 )
 
 if TYPE_CHECKING:
@@ -120,6 +118,7 @@ class Hands:
     self._at_quaternion = qadr[:, None] + np.arange(3, 7)
     self._servo_left = np.asarray([servos[0] for servos in self._servos], np.int64)
     self._servo_right = np.asarray([servos[1] for servos in self._servos], np.int64)
+    self.clipped = np.zeros(worlds, np.int64)
 
   def reset(
     self, datas: Sequence[mujoco.MjData], worlds: Sequence[int] | None = None
@@ -127,22 +126,30 @@ class Hands:
     """Hold the named worlds' hands exactly where their scenes put them."""
     for world in range(len(datas)) if worlds is None else worlds:
       data = datas[world]
-      for hand, body in enumerate(self._rig):
-        self._position[world, hand] = data.xpos[body]
-        self._quaternion[world, hand] = se3.wxyz(data.xmat[body].reshape(3, 3))
+      for hand in range(len(GRIPPERS)):
+        self._position[world, hand] = data.qpos[self._at_position[hand]]
+        self._quaternion[world, hand] = data.qpos[self._at_quaternion[hand]]
         self._opening[world, hand] = float(data.qpos[self._finger[hand]])
         self._ramp_position[world, :, hand] = self._position[world, hand]
         self._ramp_quaternion[world, :, hand] = self._quaternion[world, hand]
         self._ramp_opening[world, :, hand] = self._opening[world, hand]
       self._ramp_twist[world] = 0.0
 
-  def process(self, action: Float64Array) -> None:
+  def process(self, action: Float64Array, driven: Sequence[int]) -> None:
     """Resample the leading poses onto the substeps that track them.
 
-    A ramp is laid once per control step, so it is built world by world; the
-    wrench that reads it runs every substep and is not.
+    The action names the driven hands; every other hand is asked for its last
+    setpoint, so it holds where it was sent. A ramp is laid once per control
+    step, so it is built world by world; the wrench that reads it runs every
+    substep and is not.
     """
-    trajectory = self._checked(action)
+    trajectory = np.broadcast_to(
+      np.concatenate(
+        [self._position, self._quaternion, self._opening[..., None]], axis=-1
+      )[:, None],
+      (self.worlds, HORIZON, len(GRIPPERS), PER_HAND),
+    ).copy()
+    trajectory[:, :, list(driven)] = self._checked(action, len(driven))
     for world in range(self.worlds):
       for hand in range(len(GRIPPERS)):
         legs = trajectory[world, : self.tracked, hand]
@@ -201,17 +208,21 @@ class Hands:
     ctrl[:, self._servo_left] = angle
     ctrl[:, self._servo_right] = -angle
 
-  def _checked(self, action: Float64Array) -> Float64Array:
-    wanted = (self.worlds, *ACTION_LOW.shape)
+  def _checked(self, action: Float64Array, hands: int) -> Float64Array:
+    """The driven hands' trajectory, clipped to the box; ``clipped`` counts
+    how many entries of each world's action the box cut."""
+    low, high = action_bounds(hands)
+    wanted = (self.worlds, *low.shape)
     trajectory = np.asarray(action, np.float64)
-    if self.worlds == 1 and trajectory.shape == ACTION_LOW.shape:
+    if self.worlds == 1 and trajectory.shape == low.shape:
       trajectory = trajectory[None]
     if trajectory.shape != wanted:
       raise ValueError(f"an action has shape {wanted}, not {trajectory.shape}")
     if not np.isfinite(trajectory).all():
       raise ValueError("an action must be finite")
-    clipped = np.clip(trajectory, ACTION_LOW, ACTION_HIGH)
-    return clipped.reshape(self.worlds, HORIZON, len(GRIPPERS), PER_HAND)
+    clipped = np.clip(trajectory, low, high)
+    self.clipped = (clipped != trajectory).reshape(self.worlds, -1).sum(axis=1)
+    return clipped.reshape(self.worlds, HORIZON, hands, PER_HAND)
 
   def _twist(self, step: Float64Array, spin: Float64Array) -> Float64Array:
     """The velocity one leg of the trajectory asks for, capped.
