@@ -1,6 +1,7 @@
 """The start region a corpus's closings define, from the rows alone."""
 
 import numpy as np
+import pytest
 
 from specialist_sim.corpus.region import closings, derive, opened
 from specialist_sim.randomise import Region
@@ -80,3 +81,10 @@ def test_the_derivation_is_the_same_whatever_order_the_rows_arrive_in() -> None:
 
 def _on_ring(region: Region, spot: np.ndarray) -> bool:
   return any(np.allclose(spot, vertex) for vertex in region.vertices)
+
+
+def test_a_region_refuses_too_few_closings() -> None:
+  with pytest.raises(ValueError, match="closings"):
+    derive(
+      np.array([[0.4, 0.0], [0.5, 0.0], [0.45, 0.05]]), np.array([0.49, 0.0]), 99.0, 5.0
+    )

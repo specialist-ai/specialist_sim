@@ -191,20 +191,22 @@ class Region:
 
   def contains(self, spot: Float64Array) -> bool:
     """Whether a point lies in the ring and out of the hole."""
+    point = np.asarray(spot, np.float64)
     ring = np.asarray(self.vertices, np.float64)
     edges = np.roll(ring, -1, axis=0) - ring
-    toward = np.asarray(spot, np.float64) - ring
+    toward = point - ring
     if not (edges[:, 0] * toward[:, 1] - edges[:, 1] * toward[:, 0] >= 0.0).all():
       return False
-    return self.hole is None or bool(np.hypot(*(spot - self.hole[:2])) >= self.hole[2])
+    return self.hole is None or bool(np.hypot(*(point - self.hole[:2])) >= self.hole[2])
 
   def draw(self, scene: Scene, rng: np.random.Generator) -> Float64Array:
     ring = np.asarray(self.vertices, np.float64)
     low, high = ring.min(axis=0), ring.max(axis=0)
-    while True:
+    for _ in range(10_000):
       spot: Float64Array = rng.uniform(low, high)
       if self.contains(spot):
         return spot
+    raise ValueError("the region leaves nothing to draw from")
 
 
 def scattered(scene: Scene, rng: np.random.Generator, cfg: Scatter) -> Float64Array:

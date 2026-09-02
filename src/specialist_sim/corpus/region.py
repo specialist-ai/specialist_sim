@@ -17,13 +17,32 @@ import numpy as np
 from specialist_sim.arrays import Float64Array
 from specialist_sim.randomise import Region
 
-__all__ = ["ENGAGED", "closings", "derive", "opened", "region", "ring"]
+__all__ = [
+  "CUBE",
+  "ENGAGED",
+  "HAND",
+  "OPENING",
+  "closings",
+  "derive",
+  "opened",
+  "region",
+  "ring",
+]
 
 ENGAGED = 0.15
-"""Under this opening the fingers are on something rather than travelling."""
+"""The opening below which the fingers have closed on the cube: pads meet a
+30 mm cube near +0.02 rad and each other at -0.16, so a crossing here is a
+grasp under way rather than a hand travelling open."""
 
 STEP = "step"
 """The corpus's step lattice, which orders a session's rows."""
+
+CUBE = "/state/cube/pose:Transform3D:translation"
+OPENING = "/state/{hand}/opening:Scalars:scalars"
+"""The catalog columns a region is read from, as the state layer writes them."""
+
+HAND = "right"
+"""The hand whose closings define where a pick begins."""
 
 
 def region(
@@ -48,6 +67,8 @@ def derive(
 ) -> Region:
   """The ring around the closings and the hole around the tape, from the
   closings alone. The ring holds at least 98 of every 100 closings."""
+  if len(stood) < 4:
+    raise ValueError(f"a region needs closings to stand in, and there are {len(stood)}")
   stray = np.linalg.norm(stood - np.median(stood, axis=0), axis=1)
   kept = stood[stray <= np.percentile(stray, trim)]
   away = np.linalg.norm(stood - tape, axis=1)
