@@ -7,6 +7,7 @@ drawn again.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 import mujoco
 import numpy as np
@@ -19,6 +20,10 @@ from specialist_sim.scene import Scene
 from specialist_sim.spaces import GRIPPERS, PER_HAND
 
 __all__ = [
+  "Region",
+  "Scatter",
+  "Start",
+  "scattered",
   "RandomiseCfg",
   "home",
   "nominal",
@@ -124,6 +129,89 @@ def sample_hands(
     rotation = _turn(rng, cfg.hand_turn) @ HOME_ROTATION[hand]
     jitter = rng.uniform(-cfg.hand_jitter, cfg.hand_jitter, size=3)
     place_hand(scene, data, hand, home(scene, hand) + jitter, rotation, FINGER_HOME)
+
+
+class Start(Protocol):
+  """Where an episode opens: anything that can draw the cube a spot."""
+
+  def draw(self, scene: Scene, rng: np.random.Generator) -> Float64Array: ...
+
+
+@dataclass(frozen=True)
+class Scatter:
+  """A polar sector of table where a cube may start an episode off the tape.
+
+  The distances are where corpus_0821's picks begin — the kick leaves the cube
+  0.086 to 0.105 m from the tape — but a sector holds the corpus's distances,
+  not its shape: measured against the closings of that corpus, the true patch
+  is a 148-degree-wide, non-radial hull of which this sector covers 66%. An
+  evaluation that must match what a policy was trained on derives a ``Region``
+  from that corpus instead; these numbers are one corpus's, and accepting them
+  is itself a benchmark decision.
+  """
+
+  distance: tuple[float, float] = (0.086, 0.105)
+  turn: float = np.radians(35.0)
+  """How far either side of the line toward the picking hand the cube may lie."""
+  hand: int = 1
+  """The hand that picks, whose side the cube is scattered on."""
+
+  def draw(self, scene: Scene, rng: np.random.Generator) -> Float64Array:
+    return scattered(scene, rng, self)
+
+
+@dataclass(frozen=True)
+class Region:
+  """A patch of table, as the counter-clockwise convex ring around it, with
+  the hole the ring fills in.
+
+  Drawn from uniformly by rejection, so the distribution is the region and
+  nothing else. A corpus's picks are an annulus around the tape — the kick
+  always drives the cube away — and a convex hull of an annulus contains the
+  tape and the disc around it, which the corpus never picks from; ``hole`` is
+  that disc, as ``(x, y, radius)``, and no draw lands inside it. Both the ring
+  and the hole are derived from the corpus a policy was trained on by
+  ``specialist_sim.corpus.region``, at evaluation time, so no repo evaluates
+  against another corpus's geometry by silently accepting shipped numbers.
+  """
+
+  vertices: tuple[tuple[float, float], ...]
+  hole: tuple[float, float, float] | None = None
+
+  def __post_init__(self) -> None:
+    ring = np.asarray(self.vertices, np.float64)
+    if len(ring) < 3:
+      raise ValueError(f"a region is a ring of at least 3 vertices, not {len(ring)}")
+    ahead = np.roll(ring, -1, axis=0) - ring
+    bend = np.roll(ahead, -1, axis=0)
+    if not (ahead[:, 0] * bend[:, 1] - ahead[:, 1] * bend[:, 0] > 0.0).all():
+      raise ValueError("a region's ring is convex and counter-clockwise")
+    if self.hole is not None and self.hole[2] < 0.0:
+      raise ValueError(f"a hole's radius is not negative: {self.hole[2]}")
+
+  def draw(self, scene: Scene, rng: np.random.Generator) -> Float64Array:
+    ring = np.asarray(self.vertices, np.float64)
+    low, high = ring.min(axis=0), ring.max(axis=0)
+    edges = np.roll(ring, -1, axis=0) - ring
+    while True:
+      spot: Float64Array = rng.uniform(low, high)
+      toward = spot - ring
+      if not (edges[:, 0] * toward[:, 1] - edges[:, 1] * toward[:, 0] >= 0.0).all():
+        continue
+      if self.hole is not None and np.hypot(*(spot - self.hole[:2])) < self.hole[2]:
+        continue
+      return spot
+
+
+def scattered(scene: Scene, rng: np.random.Generator, cfg: Scatter) -> Float64Array:
+  """Where a kick would have left the cube, drawn but not placed."""
+  tape = np.asarray(scene.tape, np.float64)
+  toward = home(scene, cfg.hand)[:2] - tape
+  bearing = np.arctan2(toward[1], toward[0]) + rng.uniform(-cfg.turn, cfg.turn)
+  spot: Float64Array = tape + rng.uniform(*cfg.distance) * np.array(
+    [np.cos(bearing), np.sin(bearing)]
+  )
+  return spot
 
 
 def nominal(scene: Scene, data: mujoco.MjData) -> None:
