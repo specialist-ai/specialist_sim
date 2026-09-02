@@ -22,7 +22,7 @@ from specialist_sim.arrays import Float64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
 from specialist_sim.observation import read_hands
 from specialist_sim.randomise import RandomiseCfg
-from specialist_sim.render import Renderer
+from specialist_sim.render import Renderer, seat
 from specialist_sim.scene import Scene, SceneCfg
 from specialist_sim.spaces import F_STEP, GRIPPERS
 from specialist_sim.task import PickPlace, TaskCfg
@@ -68,6 +68,9 @@ class PickPlaceEnv:
     self.render_mode = render_mode
     self.metadata = {**PickPlaceEnv.metadata, "render_fps": round(self.cfg.control_hz)}
     self.scene = Scene(self.cfg.scene)
+    model = self.scene.model
+    for name, camera in {**self.cfg.cameras, "scene_view": SCENE_VIEW}.items():
+      camera.mount(model, seat(model, name))
     self.task = PickPlace(self.scene, self.cfg.task)
     control_dt = 1.0 / self.cfg.control_hz
     substeps = round(control_dt / self.cfg.scene.physics_dt)

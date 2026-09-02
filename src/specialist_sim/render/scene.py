@@ -1,4 +1,4 @@
-"""The drawable scene as flat arrays: triangles, their geom, and its colour."""
+"""The drawable scene, one rigid part per drawn geom."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import numpy as np
 
 from specialist_sim.arrays import Float32Array, Int32Array
 
-__all__ = ["Geometry", "gather"]
+__all__ = ["Part", "gather"]
 
 DRAWN_GROUPS = (1, 2)
 
@@ -23,30 +23,29 @@ _BOX_FACES = np.array(
 
 
 @dataclass(frozen=True)
-class Geometry:
-  """Every drawn triangle, in the frame of the geom that carries it."""
+class Part:
+  """One drawn geom's triangles, in the geom's own frame."""
 
   vertices: Float32Array
-  vertex_geom: Int32Array
   faces: Int32Array
-  face_geom: Int32Array
-  face_body: Int32Array
   albedo: Float32Array
-  geoms: Int32Array
+  body: int
+  geom: int
 
 
-def gather(model: mujoco.MjModel) -> Geometry:
-  vertices: list[np.ndarray] = []
-  vertex_geom: list[np.ndarray] = []
-  faces: list[np.ndarray] = []
-  face_geom: list[np.ndarray] = []
-  albedo: list[np.ndarray] = []
-  geoms: list[int] = []
+OPAQUE = 0.999
+"""The least alpha this renderer draws: it traces no translucency."""
+INVISIBLE = 0.05
+"""The most alpha a geom may carry and still be left out as invisible."""
+
+
+def gather(model: mujoco.MjModel) -> list[Part]:
+  parts = []
   for geom in range(model.ngeom):
     if model.geom_group[geom] not in DRAWN_GROUPS:
       continue
-    if model.geom_rgba[geom][3] < 0.999:
-      if model.geom_rgba[geom][3] > 0.05:
+    if model.geom_rgba[geom][3] < OPAQUE:
+      if model.geom_rgba[geom][3] > INVISIBLE:
         raise ValueError(f"geom {geom} is translucent and this renderer is opaque")
       continue
     kind = model.geom_type[geom]
@@ -61,23 +60,15 @@ def gather(model: mujoco.MjModel) -> Geometry:
       face = model.mesh_face[at : at + num].ravel().astype(np.int32)
     else:
       raise ValueError(
-        f"geom {geom} is a {mujoco.mjtGeom(kind).name}, which is not drawn"
+        f"geom {geom} is a {mujoco.mjtGeom(kind).name}, which this renderer cannot draw"
       )
-    index = len(geoms)
-    faces.append(face + sum(len(v) for v in vertices))
-    face_geom.append(np.full(len(face) // 3, index, np.int32))
-    vertex_geom.append(np.full(len(local), index, np.int32))
-    vertices.append(local)
-    albedo.append(model.geom_rgba[geom][:3])
-    geoms.append(geom)
-  face_geom_flat = np.concatenate(face_geom)
-  bodies = np.asarray([model.geom_bodyid[geom] for geom in geoms], np.int32)
-  return Geometry(
-    vertices=np.concatenate(vertices).astype(np.float32),
-    vertex_geom=np.concatenate(vertex_geom),
-    faces=np.concatenate(faces),
-    face_geom=face_geom_flat,
-    face_body=bodies[face_geom_flat],
-    albedo=np.asarray(albedo, np.float32),
-    geoms=np.asarray(geoms, np.int32),
-  )
+    parts.append(
+      Part(
+        vertices=local.astype(np.float32),
+        faces=face.reshape(-1, 3),
+        albedo=model.geom_rgba[geom][:3].astype(np.float32),
+        body=int(model.geom_bodyid[geom]),
+        geom=geom,
+      )
+    )
+  return parts
