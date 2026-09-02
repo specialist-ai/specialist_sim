@@ -1,14 +1,16 @@
-"""A commanded trajectory per gripper, and the wrench that chases it.
+"""A commanded trajectory per hand, resampled to the physics rate, and the
+impedance that chases it on a free rig.
 
 An action is a trajectory of absolute poses in the room frame,
 ``[position(3), quaternion(4), opening(1)]`` per hand, at ``1 / ACTION_HZ``
 intervals from now. An opening is the coupled finger angle in radians, signed as
-the left finger turns, which is the number a corpus records. A control step tracks the leading poses and drops the rest,
-so a policy commits to further ahead than it executes.
+the left finger turns, which is the number a corpus records. A control step
+tracks the leading poses and drops the rest, so a policy commits to further
+ahead than it executes.
 
-The tracker resamples the trajectory at the physics rate. The impedance's
-natural frequency sits above the control rate and below the trajectory's, so a
-setpoint that jumped once per control step would ring at it.
+The ramp resamples the trajectory at the physics rate, whatever carries the
+hands. A tracker's natural frequency sits above the control rate and below the
+trajectory's, so a setpoint that jumped once per control step would ring at it.
 """
 
 from __future__ import annotations
@@ -21,20 +23,17 @@ import mujoco
 import numpy as np
 
 from specialist_sim.arrays import Float64Array
-from specialist_sim.spaces import (
-  ACTION_HZ,
-  GRIPPERS,
-  HORIZON,
-  PER_HAND,
-  action_bounds,
-)
+from specialist_sim.control import CTRL, XFRC, FingerServos
+from specialist_sim.embodiment import FreeHand, Hand, carried
+from specialist_sim.spaces import ACTION_HZ, HORIZON, PER_HAND, action_bounds
 
 if TYPE_CHECKING:
-  from specialist_sim.scene import Gripper
+  from specialist_sim.scene import Scene
 
 __all__ = [
   "ActionCfg",
-  "Hands",
+  "Impedance",
+  "Ramp",
   "hold",
   "slerp",
   "turn",
@@ -46,12 +45,15 @@ REST = np.array([1.0, 0.0, 0.0, 0.0])
 
 @dataclass(frozen=True)
 class ActionCfg:
+  """The impedance on a free rig, and how fast a ramp may ask a hand to move."""
+
   stiffness: float = 4000.0
-  damping: float = 60.0
   rotational_stiffness: float = 40.0
-  rotational_damping: float = 0.5
   max_speed: float = 1.5
   max_turn: float = 10.0
+
+  def build(self, scene: Scene, ramp: Ramp) -> Impedance:
+    return Impedance(self, scene.hands, scene.model)
 
 
 def turn(quaternion: Float64Array) -> Float64Array:
@@ -72,21 +74,23 @@ def hold(state: Float64Array) -> Float64Array:
   return np.tile(np.asarray(state, np.float64), (HORIZON, 1))
 
 
-class Hands:
-  """The action term: decode a trajectory, resample it, and drive the model."""
+class Ramp:
+  """The commanded trajectory, resampled onto the substeps of one control step.
+
+  A new trajectory departs from the last substep of the one before it.
+  """
 
   def __init__(
     self,
-    grippers: Sequence[Gripper],
+    hands: int,
     substeps: int,
     control_dt: float,
-    cfg: ActionCfg,
-    worlds: int = 1,
+    max_speed: float,
+    max_turn: float,
+    worlds: int,
   ):
-    self.cfg, self.substeps, self.worlds = cfg, substeps, worlds
-    self._rig = [grip.rig for grip in grippers]
-    self._servos = [list(grip.servos) for grip in grippers]
-    self._finger = [grip.fingers[0] for grip in grippers]
+    self.hands, self.substeps, self.worlds = hands, substeps, worlds
+    self.max_speed, self.max_turn = max_speed, max_turn
     tracked = control_dt * ACTION_HZ
     if not np.isclose(tracked, round(tracked)):
       raise ValueError("a control step must span a whole number of poses")
@@ -102,124 +106,66 @@ class Hands:
     self.span = substeps // self.tracked
     """How many physics steps one pose spans."""
     self._blend = np.arange(1, self.span + 1) / self.span
-    hands = len(GRIPPERS)
-    self._position = np.zeros((worlds, hands, 3))
-    self._quaternion = np.zeros((worlds, hands, 4))
-    self._opening = np.zeros((worlds, hands))
-    self._ramp_position = np.zeros((worlds, substeps, hands, 3))
-    self._ramp_quaternion = np.zeros((worlds, substeps, hands, 4))
-    self._ramp_opening = np.zeros((worlds, substeps, hands))
-    self._ramp_twist = np.zeros((worlds, substeps, hands, 6))
+    self.position = np.zeros((worlds, substeps, hands, 3))
+    self.quaternion = np.zeros((worlds, substeps, hands, 4))
+    self.opening = np.zeros((worlds, substeps, hands))
+    self.twist = np.zeros((worlds, substeps, hands, 6))
     """Each substep's feedforward: linear velocity, then angular velocity
     already carried into the world frame of its setpoint."""
-    self._rigs = np.asarray(self._rig, np.int64)
-    qadr = np.asarray([grip.qpos for grip in grippers], np.int64)
-    self._at_position = qadr[:, None] + np.arange(3)
-    self._at_quaternion = qadr[:, None] + np.arange(3, 7)
-    self._servo_left = np.asarray([servos[0] for servos in self._servos], np.int64)
-    self._servo_right = np.asarray([servos[1] for servos in self._servos], np.int64)
     self.clipped = np.zeros(worlds, np.int64)
+    """How many entries of each world's last action the box cut."""
 
-  def reset(
-    self, datas: Sequence[mujoco.MjData], worlds: Sequence[int] | None = None
-  ) -> None:
-    """Hold the named worlds' hands exactly where their scenes put them."""
-    for world in range(len(datas)) if worlds is None else worlds:
-      data = datas[world]
-      for hand in range(len(GRIPPERS)):
-        self._position[world, hand] = data.qpos[self._at_position[hand]]
-        self._quaternion[world, hand] = data.qpos[self._at_quaternion[hand]]
-        self._opening[world, hand] = float(data.qpos[self._finger[hand]])
-        self._ramp_position[world, :, hand] = self._position[world, hand]
-        self._ramp_quaternion[world, :, hand] = self._quaternion[world, hand]
-        self._ramp_opening[world, :, hand] = self._opening[world, hand]
-      self._ramp_twist[world] = 0.0
+  def hold(self, worlds: Sequence[int], states: Float64Array) -> None:
+    """Hold the named worlds' hands exactly at their states, across the whole
+    step; ``states`` is ``(len(worlds), hands, PER_HAND)``."""
+    at = list(worlds)
+    self.position[at] = states[:, None, :, :3]
+    self.quaternion[at] = states[:, None, :, 3:7]
+    self.opening[at] = states[:, None, :, 7]
+    self.twist[at] = 0.0
 
   def process(self, action: Float64Array, driven: Sequence[int]) -> None:
     """Resample the leading poses onto the substeps that track them.
 
     The action names the driven hands; every other hand is asked for its last
     setpoint, so it holds where it was sent. A ramp is laid once per control
-    step, so it is built world by world; the wrench that reads it runs every
-    substep and is not.
+    step, so it is built world by world; the controller that reads it runs
+    every substep and is not.
     """
     trajectory = np.broadcast_to(
       np.concatenate(
-        [self._position, self._quaternion, self._opening[..., None]], axis=-1
+        [self.position[:, -1], self.quaternion[:, -1], self.opening[:, -1, :, None]],
+        axis=-1,
       )[:, None],
-      (self.worlds, HORIZON, len(GRIPPERS), PER_HAND),
+      (self.worlds, HORIZON, self.hands, PER_HAND),
     ).copy()
     trajectory[:, :, list(driven)] = self._checked(action, len(driven))
     for world in range(self.worlds):
-      for hand in range(len(GRIPPERS)):
+      for hand in range(self.hands):
         legs = trajectory[world, : self.tracked, hand]
-        held = self._position[world, hand][None]
-        position = np.concatenate([held, legs[:, :3]])
+        position = np.concatenate([self.position[world, -1, hand][None], legs[:, :3]])
         quaternion = np.concatenate(
-          [self._quaternion[world, hand][None], turn(legs[:, 3:7])]
+          [self.quaternion[world, -1, hand][None], turn(legs[:, 3:7])]
         )
-        opening = np.concatenate([self._opening[world, hand][None], legs[:, 7]])
+        opening = np.concatenate([self.opening[world, -1, hand][None], legs[:, 7]])
         for leg in range(self.tracked):
           across = slice(leg * self.span, (leg + 1) * self.span)
           step, blend = position[leg + 1] - position[leg], self._blend
           spin = np.empty(3)
           mujoco.mju_subQuat(spin, quaternion[leg + 1], quaternion[leg])
-          self._ramp_position[world, across, hand] = position[leg] + np.outer(
-            blend, step
-          )
-          self._ramp_quaternion[world, across, hand] = slerp(
-            quaternion[leg], spin, blend
-          )
-          self._ramp_opening[world, across, hand] = opening[leg] + blend * (
+          self.position[world, across, hand] = position[leg] + np.outer(blend, step)
+          self.quaternion[world, across, hand] = slerp(quaternion[leg], spin, blend)
+          self.opening[world, across, hand] = opening[leg] + blend * (
             opening[leg + 1] - opening[leg]
           )
           twist = self._twist(step, spin)
-          self._ramp_twist[world, across, hand, :3] = twist[:3]
-          self._ramp_twist[world, across, hand, 3:] = _rotated(
-            self._ramp_quaternion[world, across, hand], twist[None, 3:]
+          self.twist[world, across, hand, :3] = twist[:3]
+          self.twist[world, across, hand, 3:] = _rotated(
+            self.quaternion[world, across, hand], twist[None, 3:]
           )
-        self._position[world, hand] = position[-1]
-        self._quaternion[world, hand] = quaternion[-1]
-        self._opening[world, hand] = opening[-1]
-
-  def error(self, qpos: Float64Array, driven: Sequence[int]) -> Float64Array:
-    """Each world's largest gap between a driven hand and its setpoint, in metres."""
-    gaps = np.linalg.norm(
-      qpos[:, self._at_position[list(driven)]] - self._position[:, list(driven)],
-      axis=-1,
-    )
-    out: Float64Array = gaps.max(axis=1)
-    return out
-
-  def command(
-    self, qpos: Float64Array, substep: int, ctrl: Float64Array, xfrc: Float64Array
-  ) -> None:
-    """Write the servo angles and the wrench every world wants for one substep.
-
-    A rig is a free body, so the pose the impedance answers to is its joint
-    coordinates: no forward pass stands between the state and the wrench. Only
-    the rig and servo entries are ever written, so the rest of the buffers stay
-    the zeros they were built with.
-    """
-    cfg = self.cfg
-    here = qpos[:, self._at_position]
-    now = qpos[:, self._at_quaternion]
-    want = self._ramp_position[:, substep]
-    facing = self._ramp_quaternion[:, substep]
-    twist = self._ramp_twist[:, substep]
-    force = cfg.stiffness * (want - here) + cfg.damping * twist[..., :3]
-    torque = cfg.rotational_stiffness * _apart(facing, now) + (
-      cfg.rotational_damping * twist[..., 3:]
-    )
-    xfrc[:, self._rigs, :3] = force
-    xfrc[:, self._rigs, 3:] = torque
-    angle = self._ramp_opening[:, substep]
-    ctrl[:, self._servo_left] = angle
-    ctrl[:, self._servo_right] = -angle
 
   def _checked(self, action: Float64Array, hands: int) -> Float64Array:
-    """The driven hands' trajectory, clipped to the box; ``clipped`` counts
-    how many entries of each world's action the box cut."""
+    """The driven hands' trajectory, clipped to the box."""
     low, high = action_bounds(hands)
     wanted = (self.worlds, *low.shape)
     trajectory = np.asarray(action, np.float64)
@@ -236,15 +182,65 @@ class Hands:
   def _twist(self, step: Float64Array, spin: Float64Array) -> Float64Array:
     """The velocity one leg of the trajectory asks for, capped.
 
-    It exists to cancel the free body's damping, so a cap bounds how much of it
-    is cancelled without touching where the setpoint is.
+    A cap bounds how much of a carrier's damping a feedforward cancels without
+    touching where the setpoint is.
     """
     return np.concatenate(
       [
-        _capped(step * ACTION_HZ, self.cfg.max_speed),
-        _capped(spin * ACTION_HZ, self.cfg.max_turn),
+        _capped(step * ACTION_HZ, self.max_speed),
+        _capped(spin * ACTION_HZ, self.max_turn),
       ]
     )
+
+
+class Impedance:
+  """A stiff impedance on each free-flying rig, chasing the ramp with a wrench.
+
+  A rig is a free body, so the pose the impedance answers to is its joint
+  coordinates: no forward pass stands between the state and the wrench.
+  """
+
+  drives = CTRL | XFRC
+
+  def __init__(self, cfg: ActionCfg, hands: Sequence[Hand], model: mujoco.MjModel):
+    self.cfg = cfg
+    free = [carried(hand, FreeHand) for hand in hands]
+    self._rigs = np.asarray([hand.rig for hand in free], np.int64)
+    qadr = np.asarray([hand.qpos for hand in free], np.int64)
+    self._at_position = qadr[:, None] + np.arange(3)
+    self._at_quaternion = qadr[:, None] + np.arange(3, 7)
+    self._damping = np.stack(
+      [model.dof_damping[at : at + 6] for at in model.body_dofadr[self._rigs]]
+    )
+    """What the model slows each rig by, which the feedforward cancels."""
+    self.servos = FingerServos(hands)
+
+  def reset(self, datas: Sequence[mujoco.MjData], worlds: Sequence[int]) -> None:
+    """A wrench carries no state between steps."""
+
+  def command(
+    self,
+    ramp: Ramp,
+    substep: int,
+    qpos: Float64Array,
+    qvel: Float64Array,
+    ctrl: Float64Array,
+    xfrc: Float64Array,
+  ) -> None:
+    """Write the servo angles and the wrench every world wants for one substep."""
+    cfg = self.cfg
+    here = qpos[:, self._at_position]
+    now = qpos[:, self._at_quaternion]
+    want = ramp.position[:, substep]
+    facing = ramp.quaternion[:, substep]
+    twist = ramp.twist[:, substep]
+    force = cfg.stiffness * (want - here) + self._damping[:, :3] * twist[..., :3]
+    torque = cfg.rotational_stiffness * _apart(facing, now) + (
+      self._damping[:, 3:] * twist[..., 3:]
+    )
+    xfrc[:, self._rigs, :3] = force
+    xfrc[:, self._rigs, 3:] = torque
+    self.servos.command(ctrl, ramp.opening[:, substep])
 
 
 def _capped(vector: Float64Array, limit: float) -> Float64Array:

@@ -21,12 +21,14 @@ import numpy as np
 from mujoco import rollout
 
 from specialist_sim import randomise, spaces
-from specialist_sim.action import ActionCfg, Hands
+from specialist_sim.action import ActionCfg, Ramp
 from specialist_sim.arrays import BoolArray, Float64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
+from specialist_sim.control import XFRC, ControllerCfg
+from specialist_sim.embodiment import ASSETS, EmbodimentCfg, FloatingCfg, OutOfReach
 from specialist_sim.render import Renderer, seat
-from specialist_sim.scene import ASSETS, Scene, SceneCfg
-from specialist_sim.spaces import F_STEP, GRIPPERS, HORIZON
+from specialist_sim.scene import Scene, SceneCfg
+from specialist_sim.spaces import F_STEP, HORIZON, PER_HAND
 from specialist_sim.task import BIMANUAL, Judge, Task
 
 __all__ = ["Contract", "PickPlaceCfg", "PickPlaceEnv"]
@@ -40,9 +42,6 @@ STATE = mujoco.mjtState.mjSTATE_FULLPHYSICS
 the solver starts every substep from a zero warmstart, and a run of single
 substeps drifts from an unbroken one."""
 
-CONTROL = mujoco.mjtState.mjSTATE_CTRL | mujoco.mjtState.mjSTATE_XFRC_APPLIED
-"""What a substep is driven by: the finger servos, and the wrench on each rig."""
-
 
 @dataclass(frozen=True)
 class PickPlaceCfg:
@@ -55,11 +54,16 @@ class PickPlaceCfg:
   render_size: int = 480
   reset_attempts: int = 20
   penetration: float = 1e-4
-  cameras: dict[str, CameraCfg] = field(
-    default_factory=lambda: {slot: CameraCfg() for slot in GRIPPERS}
-  )
+  cameras: dict[str, CameraCfg] | None = None
+  """The lens each hand carries, by slot; ``None`` seats a nominal camera on
+  every hand the embodiment stands up."""
+  embodiment: EmbodimentCfg = field(default_factory=FloatingCfg)
+  """What carries the hands, and so which slots the room holds."""
   scene: SceneCfg = field(default_factory=SceneCfg)
   action: ActionCfg = field(default_factory=ActionCfg)
+  """How fast a ramp may move a hand, and the impedance that chases it on a free rig."""
+  controller: ControllerCfg | None = None
+  """What drives the hands along the ramp; ``None`` leaves it to the embodiment."""
   task: Task = BIMANUAL
   """Which hands a policy drives, where the episode opens, and what ends it."""
 
@@ -83,12 +87,13 @@ class _Plant:
 
   The state rows are the truth while a control step runs; the worlds' MjData
   are the truth between steps, gathered at the start of one and landed at its
-  boundaries. Stepping goes one substep at a time: the impedance answers to
+  boundaries. Stepping goes one substep at a time: a controller answers to
   where each plant is, so the pool cannot be handed a whole control step.
+  ``drives`` names the state components a substep is driven by.
   """
 
-  def __init__(self, model: mujoco.MjModel, datas: list[mujoco.MjData]):
-    self.model, self.datas = model, datas
+  def __init__(self, model: mujoco.MjModel, datas: list[mujoco.MjData], drives: int):
+    self.model, self.datas, self.drives = model, datas, drives
     worlds = len(datas)
     threads = min(worlds, os.cpu_count() or 1)
     self._roll = rollout.Rollout(nthread=threads)
@@ -98,10 +103,15 @@ class _Plant:
     self._warmstart = np.zeros((worlds, model.nv))
     """Zeros, always: rollout otherwise reuses whatever its scratch data held,
     which would make a world's step depend on which thread ran it last."""
-    self._control = np.zeros((worlds, 1, mujoco.mj_stateSize(model, CONTROL)))
+    self._control = np.zeros((worlds, 1, mujoco.mj_stateSize(model, drives)))
     self.ctrl = self._control[:, 0, : model.nu]
-    self.xfrc = self._control[:, 0, model.nu :].reshape(worlds, model.nbody, 6)
-    """Views a command is written straight into, one row per world."""
+    self.xfrc = (
+      self._control[:, 0, model.nu :].reshape(worlds, model.nbody, 6)
+      if drives & XFRC
+      else np.zeros((worlds, model.nbody, 6))
+    )
+    """Views a command is written straight into, one row per world; the wrench
+    is a view only when the plant is driven by one."""
     self.qpos = self._state[:, 1 : 1 + model.nq]
     self.qvel = self._state[:, 1 + model.nq : 1 + model.nq + model.nv]
     """Views of every world's joint coordinates and velocities, current while
@@ -119,7 +129,7 @@ class _Plant:
       self._scratch,
       self._state,
       self._control,
-      control_spec=int(CONTROL),
+      control_spec=self.drives,
       nstep=1,
       state=self._stepped,
       initial_warmstart=self._warmstart,
@@ -149,26 +159,25 @@ class PickPlaceEnv:
     modes = PickPlaceEnv.metadata["render_modes"]
     if render_mode is not None and render_mode not in modes:
       raise ValueError(f"{render_mode} is not one of {modes}")
-    if set(self.cfg.cameras) != set(GRIPPERS):
-      raise ValueError(
-        f"the cameras are {sorted(GRIPPERS)}, not {sorted(self.cfg.cameras)}"
-      )
-    self.driven = self.cfg.task.driven
-    """The hands the action commands and the observation carries rows for."""
-    self.lenses = self.cfg.task.lenses
-    """The lenses the observation carries images for."""
-    self._driven = [GRIPPERS.index(slot) for slot in self.driven]
-    if (self.cfg.action.damping, self.cfg.action.rotational_damping) != (
-      self.cfg.scene.damping,
-      self.cfg.scene.rotational_damping,
-    ):
-      raise ValueError(
-        "the feedforward cancels the rig damping, so the two must be equal"
-      )
     if not 0 <= self.cfg.camera_lag <= MAX_LAG:
       raise ValueError(
         f"a camera runs 0 to {MAX_LAG} rows behind, not {self.cfg.camera_lag}"
       )
+    self.scene = Scene(self.cfg.scene, self.cfg.embodiment.build())
+    slots = self.scene.slots
+    self.cameras = self.cfg.cameras or {slot: CameraCfg() for slot in slots}
+    """The lens each hand carries."""
+    if set(self.cameras) != set(slots):
+      raise ValueError(f"the cameras are {sorted(slots)}, not {sorted(self.cameras)}")
+    self.driven = self.cfg.task.driven
+    """The hands the action commands and the observation carries rows for."""
+    self.lenses = self.cfg.task.lenses
+    """The lenses the observation carries images for."""
+    if not set(self.driven) | set(self.lenses) <= set(slots):
+      raise ValueError(
+        f"the task drives {self.driven} and sees {self.lenses}, and the room holds {slots}"
+      )
+    self._driven = [slots.index(slot) for slot in self.driven]
     self.render_mode = render_mode
     self.metadata = {**PickPlaceEnv.metadata, "render_fps": round(self.cfg.control_hz)}
     self._stand()
@@ -176,15 +185,13 @@ class PickPlaceEnv:
     self._furnish()
 
   def _stand(self) -> None:
-    """Build the worlds: the scene, its cameras seated, one data and one task
-    per world, and the plant that steps them together.
+    """Seat the cameras, and stand one data and one judge per world.
 
     Every camera is seated before any world computes kinematics, so the first
     frames of every world already look through a mounted lens.
     """
-    self.scene = Scene(self.cfg.scene)
     model = self.scene.model
-    for name, camera in {**self.cfg.cameras, "scene_view": SCENE_VIEW}.items():
+    for name, camera in {**self.cameras, "scene_view": SCENE_VIEW}.items():
       camera.mount(model, seat(model, name))
     self.datas = [self.scene.data] + [
       mujoco.MjData(model) for _ in range(self.worlds - 1)
@@ -192,17 +199,14 @@ class PickPlaceEnv:
     self.judges = [Judge(self.scene, data, self.cfg.task) for data in self.datas]
     self.judge = self.judges[0]
     """The first world's judge, which is the whole of it when there is one."""
-    self.plant = _Plant(model, self.datas)
 
   def _pace(self) -> None:
-    """Fit the three clocks together: physics steps, rows, and control steps."""
+    """Fit the three clocks together: physics steps, rows, and control steps;
+    then lay the ramp on them, and stand the controller and the plant it drives."""
     control_dt = 1.0 / self.cfg.control_hz
     substeps = round(control_dt / self.cfg.scene.physics_dt)
     if not np.isclose(substeps * self.cfg.scene.physics_dt, control_dt):
       raise ValueError("the control step must be a whole number of physics steps")
-    self.hands = Hands(
-      self.scene.grippers, substeps, control_dt, self.cfg.action, self.worlds
-    )
     rows = F_STEP / self.cfg.control_hz
     if not np.isclose(rows, round(rows)):
       raise ValueError("a control step must span a whole number of rows")
@@ -214,6 +218,19 @@ class PickPlaceEnv:
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
     self._per_row = substeps // self.rows
+    action = self.cfg.action
+    self.ramp = Ramp(
+      len(self.scene.hands),
+      substeps,
+      control_dt,
+      action.max_speed,
+      action.max_turn,
+      self.worlds,
+    )
+    """The commanded trajectory, resampled onto this step's substeps."""
+    settings = self.cfg.controller or self.scene.embodiment.default_controller(action)
+    self.controller = settings.build(self.scene, self.ramp)
+    self.plant = _Plant(self.scene.model, self.datas, self.controller.drives)
 
   def _furnish(self) -> None:
     """Allocate what an episode fills: seeds, clocks, samples and frames."""
@@ -224,9 +241,9 @@ class PickPlaceEnv:
     """How many control steps each world has run since it was last reset."""
     self._at = np.zeros(self.worlds, np.int64)
     """The row of the step timeline each world stands on."""
-    hands = len(GRIPPERS)
-    self._poses = np.zeros((self.worlds, hands, self.rows, 7), np.float32)
-    self._openings = np.zeros((self.worlds, hands, self.rows), np.float32)
+    hands = len(self.scene.hands)
+    self._states = np.zeros((self.worlds, hands, self.rows, PER_HAND), np.float32)
+    """Every world's hands at each row of the step, laid out like a state."""
     self._frames: list[dict[int, dict[str, Any]]] = [{} for _ in range(self.worlds)]
     """What each world's lenses saw, by the row it was taken on."""
     self.renderer: Renderer | None = None
@@ -244,7 +261,7 @@ class PickPlaceEnv:
   @property
   def contract(self) -> Contract:
     """What a policy must agree with this environment on."""
-    lens = self.cfg.cameras[self.lenses[0]]
+    lens = self.cameras[self.lenses[0]]
     return Contract(
       step_hz=F_STEP,
       action_hz=spaces.ACTION_HZ,
@@ -305,16 +322,14 @@ class PickPlaceEnv:
     starts = self._starts(options, chosen)
     for world, start in zip(chosen, starts, strict=True):
       self._begin(world, self.datas[world], start)
-    self.hands.reset(self.datas, chosen)
-    for world in chosen:
       self.judges[world].reset()
-      self._steps[world] = 0
-      self._at[world] = 0
+    self._steps[chosen] = 0
+    self._at[chosen] = 0
     self.plant.gather()
-    for hand, grip in enumerate(self.scene.grippers):
-      settled = self.plant.qpos[chosen][:, None, grip.qpos : grip.qpos + 7]
-      self._poses[chosen, hand] = settled
-      self._openings[chosen, hand] = self.plant.qpos[chosen][:, None, grip.fingers[0]]
+    states = self.scene.observe(self.plant.qpos[chosen])
+    self._states[chosen] = states[:, :, None]
+    self.ramp.hold(chosen, states)
+    self.controller.reset(self.datas, chosen)
     # The rows before an episode are the state it settled into, and so is every
     # frame the first boundaries ask for.
     seen = self._render(chosen)
@@ -354,7 +369,12 @@ class PickPlaceEnv:
     left free; a fully named start gets one attempt."""
     fixed = {"state", "cube"} <= set(start)
     for _ in range(1 if fixed else self.cfg.reset_attempts):
-      self._place(world, data, start)
+      try:
+        self._place(world, data, start)
+      except OutOfReach:
+        if "state" in start:
+          raise
+        continue
       if not self._penetrating(data):
         return
     raise ValueError(
@@ -380,13 +400,15 @@ class PickPlaceEnv:
     and in everything an observation and its report carry, however many there
     are: a shape does not turn on how the environment was built.
     """
-    self.hands.process(action, self._driven)
+    self.ramp.process(action, self._driven)
     plant = self.plant
     # A world is the truth between steps, so anything moved on one since the
     # last step is what this one runs from.
     plant.gather()
-    for substep in range(self.hands.substeps):
-      self.hands.command(plant.qpos, substep, plant.ctrl, plant.xfrc)
+    for substep in range(self.ramp.substeps):
+      self.controller.command(
+        self.ramp, substep, plant.qpos, plant.qvel, plant.ctrl, plant.xfrc
+      )
       plant.substep()
       if (substep + 1) % self._per_row:
         continue
@@ -407,8 +429,8 @@ class PickPlaceEnv:
       (self._steps >= limit) & ~terminated if limit else np.zeros_like(terminated)
     )
     report = self._stacked([one[2] for one in judged])
-    report["clipped"] = self.hands.clipped.copy()
-    report["tracking"] = self.hands.error(self.plant.qpos, self._driven)
+    report["clipped"] = self.ramp.clipped.copy()
+    report["tracking"] = self._tracking()
     return self._observe(), reward, terminated, truncated, report
 
   def _keep(self, offset: int) -> None:
@@ -424,10 +446,16 @@ class PickPlaceEnv:
 
   def _sample(self, row: int) -> None:
     """Keep every world's hands at one row of the step timeline."""
-    qpos = self.plant.qpos
-    for hand, grip in enumerate(self.scene.grippers):
-      self._poses[:, hand, row] = qpos[:, grip.qpos : grip.qpos + 7]
-      self._openings[:, hand, row] = qpos[:, grip.fingers[0]]
+    self._states[:, :, row] = self.scene.observe(self.plant.qpos)
+
+  def _tracking(self) -> Float64Array:
+    """Each world's largest gap between a driven hand and its setpoint at the
+    step's end, in metres."""
+    apart = (
+      self._states[:, self._driven, -1, :3] - self.ramp.position[:, -1, self._driven]
+    )
+    out: Float64Array = np.linalg.norm(apart, axis=-1).max(axis=1)
+    return out
 
   def _stacked(self, reports: list[dict[str, Any]]) -> dict[str, Any]:
     """Every world's account of the cube, as one report."""
@@ -457,11 +485,11 @@ class PickPlaceEnv:
         [np.arange(one - self.rows + 1, one + 1, dtype=np.int64) for one in self._at]
       )
     }
-    for hand, slot in enumerate(GRIPPERS):
+    for hand, slot in enumerate(self.scene.slots):
       fields: dict[str, Any] = {}
       if slot in self.driven:
-        fields["pose"] = self._poses[:, hand].copy()
-        fields["opening"] = self._openings[:, hand].copy()
+        fields["pose"] = self._states[:, hand, :, :7].copy()
+        fields["opening"] = self._states[:, hand, :, 7].copy()
       if slot in self.lenses:
         fields["image"] = np.stack([frame[slot] for frame in frames])
         fields["image_step"] = taken.copy()
@@ -474,7 +502,7 @@ class PickPlaceEnv:
     if self.renderer is None:
       self.renderer = Renderer(
         self.scene.model,
-        {slot: self.cfg.cameras[slot] for slot in self.lenses},
+        {slot: self.cameras[slot] for slot in self.lenses},
         self.cfg.image_size,
       )
     out = []

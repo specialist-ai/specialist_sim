@@ -207,7 +207,7 @@ class Expert:
     self.scene, self.judge, self.rng = env.scene, env.judge, rng
     self.cfg = cfg or ExpertCfg()
     self.period = 1.0 / ACTION_HZ
-    self.tracked = env.hands.tracked
+    self.tracked = env.ramp.tracked
     """How many of the poses it emits a control step executes."""
     self.stage = 0
     self.cycles = 0

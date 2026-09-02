@@ -1,52 +1,24 @@
-"""The compiled scene: a table, a cube on a tape target, and two grippers."""
+"""The compiled scene: a table, a cube on a tape target, and the hands an
+embodiment stands in the room."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 import mujoco
 import numpy as np
 
 from specialist_sim.arrays import Float64Array
-from specialist_sim.spaces import (
-  FINGER_HIGH,
-  FINGER_LOW,
-  FINGER_OPEN,
-  FINGER_SHUT,
-  GRIPPERS,
-  gripper_from_opening,
-)
+from specialist_sim.embodiment import ASSETS, Embodiment, Hand
+from specialist_sim.spaces import FINGER_SHUT, PER_HAND, gripper_from_opening
 
-__all__ = ["SceneCfg", "Scene", "Gripper", "Cube"]
-
-ASSETS = Path(__file__).parent / "assets"
+__all__ = ["SceneCfg", "Scene", "Cube"]
 
 
 @dataclass(frozen=True)
 class SceneCfg:
   physics_dt: float = 1.0 / 2000.0
-  damping: float = 60.0
-  rotational_damping: float = 0.5
-  """What slows a free rig, which the impedance's feedforward exists to cancel:
-  the two must be the same numbers, and the environment holds them to it."""
-
-
-@dataclass(frozen=True)
-class Gripper:
-  """One hand, by the role each of its ids plays."""
-
-  rig: int
-  """The free body a wrench pulls on."""
-  qpos: int
-  """Where that body's position and orientation start."""
-  dof: int
-  """Where its velocity starts: linear in the world, angular in the body."""
-  fingers: tuple[int, int]
-  """Where the left and right finger angles live."""
-  servos: tuple[int, int]
-  """The left and right position servos."""
 
 
 @dataclass(frozen=True)
@@ -61,27 +33,24 @@ class Cube:
   """The height of its centre when it sits on the table."""
 
 
-def _compiled() -> mujoco.MjModel:
-  """The room with a gripper attached under each hand's name.
-
-  One gripper is described once and attached twice, so the two differ only in
-  the prefix every name they own carries.
-  """
+def _compiled(embodiment: Embodiment) -> mujoco.MjModel:
+  """The room with the embodiment's hands standing in it."""
   room = mujoco.MjSpec.from_file(str(ASSETS / "room.xml"))
-  for slot in GRIPPERS:
-    gripper = mujoco.MjSpec.from_file(str(ASSETS / "gripper.xml"))
-    room.attach(gripper, prefix=f"{slot}_", frame=room.worldbody.add_frame())
+  embodiment.attach(room)
   return room.compile()
 
 
 class Scene:
   """The model, plus the ids and lengths everything else asks for."""
 
-  def __init__(self, cfg: SceneCfg | None = None):
-    cfg = cfg or SceneCfg()
-    self.model = _compiled()
+  def __init__(self, cfg: SceneCfg, embodiment: Embodiment):
+    self.embodiment = embodiment
+    self.slots = embodiment.slots
+    """The hands the room holds, in ``GRIPPERS``' order."""
+    self.model = _compiled(embodiment)
     self.model.opt.timestep = cfg.physics_dt
     self.data = mujoco.MjData(self.model)
+    self._scratch = mujoco.MjData(self.model)
     self.table_top = float(
       self.model.body("table").pos[2] + self.model.geom("table").size[2]
     )
@@ -96,7 +65,8 @@ class Scene:
       side=side,
       rest=self.table_top + side / 2.0,
     )
-    self.grippers = tuple(self._gripper(slot, cfg) for slot in GRIPPERS)
+    self.hands: tuple[Hand, ...] = embodiment.bind(self.model)
+    """Each hand's ids, in slot order."""
     self.pads = np.array(
       sorted(
         geom
@@ -114,32 +84,19 @@ class Scene:
     self.pinch = self._pinch()
     """The opening at which the pads just touch a seated cube."""
 
-  def _gripper(self, slot: str, cfg: SceneCfg) -> Gripper:
-    rig = self.model.body(f"{slot}_rig")
-    damping = self.model.dof_damping[rig.dofadr[0] : rig.dofadr[0] + 6]
-    damping[:3], damping[3:] = cfg.damping, cfg.rotational_damping
-    joints = [self.model.joint(f"{slot}_{side}_finger") for side in ("left", "right")]
-    for joint, sign in zip(joints, (1.0, -1.0), strict=True):
-      wanted = sorted(sign * angle for angle in (FINGER_SHUT, FINGER_OPEN))
-      low, high = joint.range
-      if wanted[0] < low - 1e-9 or wanted[1] > high + 1e-9:
-        raise ValueError(
-          f"{joint.name} travels {low:.4f}..{high:.4f}, which does not hold "
-          f"the commanded {wanted[0]:.4f}..{wanted[1]:.4f}"
-        )
-      bounds = sorted(sign * angle for angle in (FINGER_LOW, FINGER_HIGH))
-      if not np.allclose([low, high], bounds, atol=1e-6):
-        raise ValueError(
-          f"{joint.name} travels {low:.6f}..{high:.6f}, and an action is "
-          f"bounded to {bounds[0]:.6f}..{bounds[1]:.6f}"
-        )
-    return Gripper(
-      rig=rig.id,
-      qpos=int(self.model.jnt_qposadr[rig.jntadr[0]]),
-      dof=int(rig.dofadr[0]),
-      fingers=(int(joints[0].qposadr[0]), int(joints[1].qposadr[0])),
-      servos=tuple(self.model.actuator(joint.name).id for joint in joints),
-    )
+  def observe(self, qpos: Float64Array) -> Float64Array:
+    """Every world's hands read out of ``qpos``, ``(worlds, nq)``, by forward
+    kinematics, laid out like a state: each base's position and quaternion,
+    then its left finger's angle, ``(worlds, hands, PER_HAND)``."""
+    out = np.empty((len(qpos), len(self.hands), PER_HAND))
+    for world, state in enumerate(qpos):
+      self._scratch.qpos[:] = state
+      mujoco.mj_kinematics(self.model, self._scratch)
+      for index, hand in enumerate(self.hands):
+        out[world, index, :3] = self._scratch.xpos[hand.base]
+        out[world, index, 3:7] = self._scratch.xquat[hand.base]
+        out[world, index, 7] = state[hand.fingers[0]]
+    return out
 
   def _pinch(self) -> float:
     """The opening at which the pads just touch a cube seated between them.
@@ -149,20 +106,18 @@ class Scene:
     contact; the fingers then fire the cube out as they open. A grasp closes to
     just inside this instead.
     """
-    data = mujoco.MjData(self.model)
+    hand, data = self.hands[0], mujoco.MjData(self.model)
     mujoco.mj_forward(self.model, data)
-    base = self.model.body(f"{GRIPPERS[0]}_base").id
-    seat = data.xpos[base] + data.xmat[base].reshape(3, 3) @ self.grasp
+    seat = data.xpos[hand.base] + data.xmat[hand.base].reshape(3, 3) @ self.grasp
     data.qpos[self.cube.qpos : self.cube.qpos + 3] = seat
-    fingers = self.grippers[0].fingers
     bodies = {
-      self.model.body(f"{GRIPPERS[0]}_{side}_finger").id for side in ("left", "right")
+      self.model.body(f"{hand.slot}_{side}_finger").id for side in ("left", "right")
     }
     pads = [geom for geom in self.pads if self.model.geom_bodyid[geom] in bodies]
 
     def gap(opening: float) -> float:
       angle = gripper_from_opening(opening)
-      data.qpos[fingers[0]], data.qpos[fingers[1]] = angle, -angle
+      data.qpos[list(hand.fingers)] = angle, -angle
       mujoco.mj_forward(self.model, data)
       return min(
         float(mujoco.mj_geomDistance(self.model, data, pad, self.cube.geom, 1.0, None))
@@ -182,24 +137,24 @@ class Scene:
 
     The pads first touch at their very end; an object seats further in.
     """
-    data = mujoco.MjData(self.model)
-    for address, sign in zip(self.grippers[0].fingers, (1.0, -1.0), strict=True):
-      data.qpos[address] = sign * FINGER_SHUT
+    hand, data = self.hands[0], self._scratch
+    data.qpos[list(hand.fingers)] = FINGER_SHUT, -FINGER_SHUT
     mujoco.mj_forward(self.model, data)
-    hinge = data.xanchor[self.model.joint(f"{GRIPPERS[0]}_left_finger").id]
+    hinge = data.xanchor[self.model.joint(f"{hand.slot}_left_finger").id]
     tips = [
       max(
         (
           geom
           for geom in self.pads
           if self.model.geom_bodyid[geom]
-          == self.model.body(f"{GRIPPERS[0]}_{side}_finger").id
+          == self.model.body(f"{hand.slot}_{side}_finger").id
         ),
         key=lambda geom: float(np.linalg.norm(data.geom_xpos[geom] - hinge)),
       )
       for side in ("left", "right")
     ]
-    base = self.model.body(f"{GRIPPERS[0]}_base").id
     middle = 0.5 * (data.geom_xpos[tips[0]] + data.geom_xpos[tips[1]])
-    local: Float64Array = data.xmat[base].reshape(3, 3).T @ (middle - data.xpos[base])
+    local: Float64Array = data.xmat[hand.base].reshape(3, 3).T @ (
+      middle - data.xpos[hand.base]
+    )
     return local

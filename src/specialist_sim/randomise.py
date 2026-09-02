@@ -67,28 +67,32 @@ def place_hand(
   scene: Scene,
   data: mujoco.MjData,
   hand: int,
-  position: npt.ArrayLike,
-  rotation: Float64Array,
-  finger: float,
+  position: Float64Array,
+  quaternion: Float64Array,
+  opening: float,
 ) -> None:
-  """Put one hand at a pose, its two fingers mirrored to an angle."""
-  grip = scene.grippers[hand]
-  data.qpos[grip.qpos : grip.qpos + 3] = position
-  data.qpos[grip.qpos + 3 : grip.qpos + 7] = se3.wxyz(rotation)
-  for address, sign in zip(grip.fingers, (1.0, -1.0), strict=True):
-    data.qpos[address] = sign * finger
+  """Put one hand at a pose, its two fingers mirrored to an opening."""
+  one = scene.hands[hand]
+  data.qpos[list(one.fingers)] = opening, -opening
+  scene.embodiment.place(data, one, position, quaternion)
 
 
 def place_hands(scene: Scene, data: mujoco.MjData, state: Float64Array) -> None:
   """Put every hand exactly where a state vector says."""
-  for hand in range(len(GRIPPERS)):
+  hands = len(scene.hands)
+  if state.shape != (hands * PER_HAND,):
+    raise ValueError(
+      f"a state names {hands} hands as {hands * PER_HAND} numbers, not {state.shape}"
+    )
+  for hand in range(hands):
     one = state[hand * PER_HAND : (hand + 1) * PER_HAND]
-    place_hand(scene, data, hand, one[:3], se3.rotation(turn(one[3:7])), float(one[7]))
+    place_hand(scene, data, hand, one[:3], turn(one[3:7]), float(one[7]))
 
 
-def home(scene: Scene, hand: int) -> Float64Array:
-  """A hand's resting position, standing off above the table."""
-  return np.array([*HOME_XY[hand], scene.table_top + HOME_HEIGHT])
+def home(scene: Scene, side: int) -> Float64Array:
+  """Where the hand on one side of the rig rests, standing off above the
+  table; ``side`` indexes ``GRIPPERS``."""
+  return np.array([*HOME_XY[side], scene.table_top + HOME_HEIGHT])
 
 
 class HandStart(Protocol):
@@ -108,9 +112,12 @@ class Homes:
   def place(
     self, scene: Scene, data: mujoco.MjData, hand: int, rng: np.random.Generator
   ) -> None:
-    rotation = _turned(rng, self.turn) @ HOME_ROTATION[hand]
+    side = GRIPPERS.index(scene.slots[hand])
+    rotation = _turned(rng, self.turn) @ HOME_ROTATION[side]
     jitter = rng.uniform(-self.jitter, self.jitter, size=3)
-    place_hand(scene, data, hand, home(scene, hand) + jitter, rotation, self.opening)
+    place_hand(
+      scene, data, hand, home(scene, side) + jitter, se3.wxyz(rotation), self.opening
+    )
 
 
 class Start(Protocol):
@@ -129,8 +136,8 @@ class OnTape:
   hands: tuple[HandStart, ...] = (Homes(), Homes())
 
   def place(self, scene: Scene, data: mujoco.MjData, rng: np.random.Generator) -> None:
-    for hand, start in enumerate(self.hands):
-      start.place(scene, data, hand, rng)
+    for hand in range(len(scene.hands)):
+      self.hands[hand].place(scene, data, hand, rng)
     place_cube(scene, data, scene.tape, rng.uniform(0.0, self.turn))
 
 
@@ -191,8 +198,8 @@ class Kicked:
   hands: tuple[HandStart, ...] = (Homes(), Homes())
 
   def place(self, scene: Scene, data: mujoco.MjData, rng: np.random.Generator) -> None:
-    for hand, start in enumerate(self.hands):
-      start.place(scene, data, hand, rng)
+    for hand in range(len(scene.hands)):
+      self.hands[hand].place(scene, data, hand, rng)
     place_cube(scene, data, self.region.draw(rng), rng.uniform(0.0, self.turn))
 
 

@@ -1,35 +1,44 @@
 # specialist_sim
 
-A simulated capture rig for evaluating manipulation policies. Two flying
-grippers pick and place a cube on a table, each carrying a fisheye camera that
-renders through the same lens model the real captures were solved with.
+A simulated capture rig for evaluating manipulation policies. Two grippers
+pick and place a cube on a table, each carrying a fisheye camera that renders
+through the same lens model the real captures were solved with. What holds a
+gripper up is configuration: by default each flies free, pulled about by a
+wrench.
 
 ```python
 from specialist_sim import PickPlaceEnv
 from specialist_sim.action import hold
+from specialist_sim.observation import flat_row
 
 env = PickPlaceEnv()
 observation, info = env.reset(seed=0)
-observation, reward, terminated, truncated, info = env.step(hold(observation["state"]))
+observation, reward, terminated, truncated, info = env.step(hold(flat_row(observation)))
 ```
 
 The interface follows Gymnasium; the package does not depend on it.
 
 ## Observation and action
 
-Both hands appear in one flat vector, eight numbers each: a room-frame
-position, a rotation as a quaternion, and a finger opening from shut to the
-joint's full travel. One such vector is a pose.
+A hand is eight numbers: its gripper base's room-frame position, a rotation
+as a quaternion, and a finger opening in radians. One such vector is a pose.
+An observation carries every row of the 100 Hz step timeline a control step
+spanned, for each hand the task drives, with a leading axis over the worlds
+the environment holds:
 
 | key | shape | meaning |
 | --- | --- | --- |
-| `observation["left_gripper"]`, `["right_gripper"]` | `(image_size, image_size, 3)` uint8 | what each gripper's lens sees, blanked outside the disc |
-| `observation["state"]` | `(16,)` float32 | both hands now, in one pose's layout |
-| `action` | `(16, 16)` float64 | the trajectory both hands follow over the next 0.32 s |
+| `observation["step"]` | `(worlds, rows)` int64 | the rows this step spanned |
+| `observation[slot]["pose"]` | `(worlds, rows, 7)` float32 | the base's position and quaternion at each row |
+| `observation[slot]["opening"]` | `(worlds, rows)` float32 | the finger angle at each row |
+| `observation[slot]["image"]` | `(worlds, image_size, image_size, 3)` uint8 | what the lens saw, blanked outside the disc |
+| `observation[slot]["image_step"]` | `(worlds,)` int64 | the row that frame was taken at |
+| `action` | `(worlds, 16, 8 × hands)` float64 | the trajectory the driven hands follow over the next 0.32 s |
 
-Because the layouts match, a residual policy is a subtraction. The reward is
-one on the step the cube settles onto the tape unheld, so an undiscounted
-return is the success indicator.
+`observation.flat_row` lays one world's hands out like one row of the action,
+so a residual policy is a subtraction. The reward is one on the step the cube
+settles onto the tape unheld, so an undiscounted return is the success
+indicator.
 
 A lens keeps the middle `MASK_RADIUS` of its width and is black outside it,
 which is the disc a recorded image keeps. The projection stays invertible
@@ -44,10 +53,11 @@ tracks the leading five and discards the other eleven: the policy commits to
 motion five times finer than one step could. `action.hold(state)` builds the
 trajectory that asks to stay put.
 
-The tracker underneath is a stiff impedance on each free-flying gripper. It
-resamples the trajectory onto the physics step, so the setpoint walks the
-commanded path at 2 kHz rather than jumping once per control step, and its
-velocity feedforward comes from the leg it is on.
+The environment resamples the trajectory onto the physics step, so the
+setpoint walks the commanded path at 2 kHz rather than jumping once per
+control step, with a velocity feedforward from the leg it is on. A controller
+chases that ramp every physics step; the default is a stiff impedance pulling
+each free-flying gripper with a wrench.
 
 The three rates are locked together: a control step must span a whole number of
 poses, and a pose a whole number of physics steps. At 2 kHz physics and a 50 Hz
@@ -60,6 +70,28 @@ objects, from the environment's own configuration. They need the `gym` extra.
 `env.render()` returns a view of the room from a fixed camera when the
 environment is built with `render_mode="rgb_array"`. Alongside it,
 `env.views[slot].body` names the body each pixel struck.
+
+## Choosing what carries the hands
+
+`PickPlaceCfg.embodiment` names what holds the grippers up and which of the
+two slots, `left_gripper` and `right_gripper`, the room holds. A task drives
+some of those hands; a `reset` state names all of them. `PickPlaceCfg.controller`
+names what drives them along the ramp, defaulting to what the embodiment prefers.
+
+```python
+from specialist_sim.embodiment import FloatingCfg
+from specialist_sim.task import right_task
+
+one = FloatingCfg(slots=("right_gripper",))
+env = PickPlaceEnv(PickPlaceCfg(embodiment=one, task=right_task(region)))
+```
+
+Another carrier implements `specialist_sim.embodiment.Embodiment`, and whatever
+drives it `specialist_sim.control.Controller`; the protocols say what each must
+do. A hand's state is its gripper base's pose whatever carries it, so a policy
+is not told. `tests/gantry.py` is such a carrier, a joint chain read by forward
+kinematics and driven through `ctrl`, and the seam tests run on it beside the
+free rig.
 
 ## Choosing the cameras
 
@@ -74,12 +106,13 @@ env = PickPlaceEnv(PickPlaceCfg(cameras={"left_gripper": CameraCfg(), "right_gri
 
 `CameraCfg` carries the MEI intrinsics at the width they were measured at and
 the lens's seat on the gripper base, so a caller holding a real calibration
-renders through it instead.
+renders through it. The cameras are named for the slots the embodiment holds;
+left unset, every hand carries the nominal camera.
 
 ## Starting where you choose
 
 `reset` takes a state and a cube position, for an evaluation that repeats one
-episode exactly:
+episode exactly; the state names every hand the room holds, eight numbers each:
 
 ```python
 env.reset(seed=0, options={"state": start, "cube": (0.52, 0.06)})

@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from specialist_sim.arrays import Float32Array, Float64Array, Int64Array
+from specialist_sim.arrays import Float32Array, Int64Array
 
 __all__ = [
   "ROWS_PER_POSE",
@@ -101,15 +101,16 @@ the fingers reach as far as their joint does."""
 PER_HAND = len(_HAND_LOW)
 STATE_LOW: Float32Array = np.array(_HAND_LOW * len(GRIPPERS), dtype=np.float32)
 STATE_HIGH: Float32Array = np.array(_HAND_HIGH * len(GRIPPERS), dtype=np.float32)
-ACTION_LOW: Float32Array = np.tile(STATE_LOW, (HORIZON, 1))
-ACTION_HIGH: Float32Array = np.tile(STATE_HIGH, (HORIZON, 1))
 
 
-def action_bounds(hands: int) -> tuple[Float64Array, Float64Array]:
+def action_bounds(hands: int) -> tuple[Float32Array, Float32Array]:
   """The action box for a policy driving ``hands`` of the rig's grippers."""
-  low = np.tile(np.asarray(_HAND_LOW, np.float64), (HORIZON, hands))
-  high = np.tile(np.asarray(_HAND_HIGH, np.float64), (HORIZON, hands))
+  low: Float32Array = np.tile(STATE_LOW[:PER_HAND], (HORIZON, hands))
+  high: Float32Array = np.tile(STATE_HIGH[:PER_HAND], (HORIZON, hands))
   return low, high
+
+
+ACTION_LOW, ACTION_HIGH = action_bounds(len(GRIPPERS))
 
 
 def gym_spaces(

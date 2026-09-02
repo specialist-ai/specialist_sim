@@ -7,6 +7,7 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
+from specialist_sim.embodiment import EmbodimentCfg
 from specialist_sim.env import MAX_LAG
 from specialist_sim.observation import flat_row
 from specialist_sim.spaces import (
@@ -19,8 +20,8 @@ from specialist_sim.spaces import (
 
 
 @pytest.fixture(scope="module")
-def env() -> PickPlaceEnv:
-  return PickPlaceEnv()
+def env(embodiment: EmbodimentCfg) -> PickPlaceEnv:
+  return PickPlaceEnv(PickPlaceCfg(embodiment=embodiment))
 
 
 def test_a_reset_reports_every_camera_and_the_hands(env: PickPlaceEnv) -> None:
@@ -69,8 +70,8 @@ def test_a_command_outside_the_box_is_clipped(env: PickPlaceEnv) -> None:
   assert np.isfinite(env.scene.data.qpos).all()
 
 
-def test_reset_options_place_the_cube_and_the_hands() -> None:
-  env = PickPlaceEnv()
+def test_reset_options_place_the_cube_and_the_hands(embodiment: EmbodimentCfg) -> None:
+  env = PickPlaceEnv(PickPlaceCfg(embodiment=embodiment))
   chosen = flat_row(env.reset(seed=1)[0]).astype(np.float64)
   cube = (0.52, 0.06)
   obs, _ = env.reset(seed=2, options={"state": chosen, "cube": cube})
@@ -102,7 +103,7 @@ def test_a_command_outside_the_box_lands_on_the_edge_of_it() -> None:
   commanded = hold(flat_row(obs))
   commanded[:, :3] = 1e6
   env.step(commanded)
-  assert env.hands._position[0, 0] == pytest.approx(STATE_HIGH[:3], abs=1e-6)
+  assert env.ramp.position[0, -1, 0] == pytest.approx(STATE_HIGH[:3], abs=1e-6)
   for _ in range(60):
     obs, *_ = env.step(commanded)
   assert (flat_row(obs)[:3] <= STATE_HIGH[:3] + 1e-3).all()
@@ -191,9 +192,12 @@ def test_a_step_reports_the_rows_it_spanned(env: PickPlaceEnv) -> None:
       assert obs[slot]["image_step"][0] == obs["step"][0][-1] - env.cfg.camera_lag
 
 
-def test_one_world_restarts_while_the_others_carry_on() -> None:
+def test_one_world_restarts_while_the_others_carry_on(
+  embodiment: EmbodimentCfg,
+) -> None:
   """An evaluation runs many episodes at once and they do not end together."""
-  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6), worlds=3)
+  cfg = PickPlaceCfg(image_size=64, max_steps=10**6, embodiment=embodiment)
+  env = PickPlaceEnv(cfg, worlds=3)
   obs, _ = env.reset(seeds=[0, 1, 2])
   action = np.stack([hold(flat_row(obs, world=w)) for w in range(3)])
   for _ in range(3):
@@ -220,9 +224,11 @@ def test_a_reset_refuses_a_world_it_does_not_have() -> None:
     env.reset(worlds=[0, 0])
 
 
-def test_a_world_in_a_batch_walks_the_path_it_walks_alone() -> None:
+def test_a_world_in_a_batch_walks_the_path_it_walks_alone(
+  embodiment: EmbodimentCfg,
+) -> None:
   """Worlds share nothing but the model, so company cannot change one."""
-  cfg = PickPlaceCfg(image_size=64, max_steps=10**6)
+  cfg = PickPlaceCfg(image_size=64, max_steps=10**6, embodiment=embodiment)
   alone = PickPlaceEnv(cfg)
   crowd = PickPlaceEnv(cfg, worlds=3)
   obs_a, _ = alone.reset(seed=7)

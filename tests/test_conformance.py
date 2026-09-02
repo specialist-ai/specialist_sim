@@ -6,7 +6,8 @@ import sys
 import numpy as np
 import pytest
 
-from specialist_sim import PickPlaceEnv
+from specialist_sim import PickPlaceCfg, PickPlaceEnv
+from specialist_sim.embodiment import EmbodimentCfg
 
 gym = pytest.importorskip("gymnasium")
 check_env = pytest.importorskip("gymnasium.utils.env_checker").check_env
@@ -15,8 +16,8 @@ check_env = pytest.importorskip("gymnasium.utils.env_checker").check_env
 class _Adapter(gym.Env):  # type: ignore[misc,name-defined]
   metadata = PickPlaceEnv.metadata
 
-  def __init__(self) -> None:
-    self._env = PickPlaceEnv()
+  def __init__(self, embodiment: EmbodimentCfg) -> None:
+    self._env = PickPlaceEnv(PickPlaceCfg(embodiment=embodiment))
     self.observation_space = self._env.observation_space
     self.action_space = self._env.action_space
 
@@ -55,8 +56,8 @@ class _Adapter(gym.Env):  # type: ignore[misc,name-defined]
     return self._env.render()
 
 
-def test_the_interface_satisfies_the_checker() -> None:
-  check_env(_Adapter(), skip_render_check=True)
+def test_the_interface_satisfies_the_checker(embodiment: EmbodimentCfg) -> None:
+  check_env(_Adapter(embodiment), skip_render_check=True)
 
 
 def test_the_runtime_imports_no_gymnasium() -> None:

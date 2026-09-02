@@ -9,6 +9,7 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.calibration import CameraCfg
+from specialist_sim.embodiment import EmbodimentCfg
 from specialist_sim.mei import mei_project, mei_unproject
 from specialist_sim.rays import build_rays
 from specialist_sim.spaces import GRIPPERS
@@ -46,9 +47,11 @@ def test_a_bearing_survives_the_projection_round_trip() -> None:
   assert np.abs(again - rays.bearings).max() < 1e-6
 
 
-def test_a_camera_reports_which_body_each_pixel_struck() -> None:
+def test_a_camera_reports_which_body_each_pixel_struck(
+  embodiment: EmbodimentCfg,
+) -> None:
   """Each pixel's body id names what it struck."""
-  env = PickPlaceEnv()
+  env = PickPlaceEnv(PickPlaceCfg(embodiment=embodiment))
   env.reset(seed=3)
   model = env.scene.model
   seen = {
