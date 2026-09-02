@@ -144,10 +144,7 @@ class Judge:
     position: Float64Array = data.xpos[cube.body]
     velocity = data.cvel[cube.body]
     upright = float(np.abs(data.xmat[cube.body].reshape(3, 3)[2]).max())
-    on_target = bool(
-      abs(position[0] - scene.tape[0]) <= scene.tape_half[0] + cfg.place_tolerance
-      and abs(position[1] - scene.tape[1]) <= scene.tape_half[1] + cfg.place_tolerance
-    )
+    on_target = self.on_target(position)
     self._displaced |= not on_target
     report = {
       "is_success": self._succeeded,
@@ -165,6 +162,14 @@ class Judge:
     }
     report["settled"] = bool(on_target and report["resting"] and not report["held"])
     return report
+
+  def on_target(self, position: Float64Array) -> bool:
+    """Whether a cube at ``position`` stands on the tape."""
+    scene, cfg = self.scene, self.cfg
+    return bool(
+      abs(position[0] - scene.tape[0]) <= scene.tape_half[0] + cfg.place_tolerance
+      and abs(position[1] - scene.tape[1]) <= scene.tape_half[1] + cfg.place_tolerance
+    )
 
   def _held(self) -> bool:
     pairs = self.data.contact.geom[: self.data.ncon]

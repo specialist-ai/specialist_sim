@@ -16,6 +16,7 @@ from specialist_sim.spaces import (
   FINGER_OPEN,
   FINGER_SHUT,
   GRIPPERS,
+  gripper_from_opening,
 )
 
 __all__ = ["SceneCfg", "Scene", "Gripper", "Cube"]
@@ -40,6 +41,8 @@ class Gripper:
   """The free body a wrench pulls on."""
   qpos: int
   """Where that body's position and orientation start."""
+  dof: int
+  """Where its velocity starts: linear in the world, angular in the body."""
   fingers: tuple[int, int]
   """Where the left and right finger angles live."""
   servos: tuple[int, int]
@@ -82,6 +85,7 @@ class Scene:
     self.table_top = float(
       self.model.body("table").pos[2] + self.model.geom("table").size[2]
     )
+    self.table = tuple(float(value) for value in self.model.body("table").pos[:2])
     self.tape = tuple(float(value) for value in self.model.body("tape").pos[:2])
     self.tape_half = tuple(float(value) for value in self.model.geom("tape").size[:2])
     side = 2.0 * float(self.model.geom("cube").size[0])
@@ -107,6 +111,8 @@ class Scene:
     """Every finger pad's geom, which is what a grasp touches with."""
     self.grasp = self._grasp()
     """Where a hand's pads meet when shut, in its base frame."""
+    self.pinch = self._pinch()
+    """The opening at which the pads just touch a seated cube."""
 
   def _gripper(self, slot: str, cfg: SceneCfg) -> Gripper:
     rig = self.model.body(f"{slot}_rig")
@@ -130,9 +136,46 @@ class Scene:
     return Gripper(
       rig=rig.id,
       qpos=int(self.model.jnt_qposadr[rig.jntadr[0]]),
+      dof=int(rig.dofadr[0]),
       fingers=(int(joints[0].qposadr[0]), int(joints[1].qposadr[0])),
       servos=tuple(self.model.actuator(joint.name).id for joint in joints),
     )
+
+  def _pinch(self) -> float:
+    """The opening at which the pads just touch a cube seated between them.
+
+    The finger servo holds a commanded angle, so closing past this point presses
+    on the cube with whatever force the error asks for and stores it in the
+    contact; the fingers then fire the cube out as they open. A grasp closes to
+    just inside this instead.
+    """
+    data = mujoco.MjData(self.model)
+    mujoco.mj_forward(self.model, data)
+    base = self.model.body(f"{GRIPPERS[0]}_base").id
+    seat = data.xpos[base] + data.xmat[base].reshape(3, 3) @ self.grasp
+    data.qpos[self.cube.qpos : self.cube.qpos + 3] = seat
+    fingers = self.grippers[0].fingers
+    bodies = {
+      self.model.body(f"{GRIPPERS[0]}_{side}_finger").id for side in ("left", "right")
+    }
+    pads = [geom for geom in self.pads if self.model.geom_bodyid[geom] in bodies]
+
+    def gap(opening: float) -> float:
+      angle = gripper_from_opening(opening)
+      data.qpos[fingers[0]], data.qpos[fingers[1]] = angle, -angle
+      mujoco.mj_forward(self.model, data)
+      return min(
+        float(mujoco.mj_geomDistance(self.model, data, pad, self.cube.geom, 1.0, None))
+        for pad in pads
+      )
+
+    if gap(0.0) >= 0.0:
+      raise ValueError("the pads never reach the cube, so nothing can be grasped")
+    low, high = 0.0, 1.0
+    for _ in range(40):
+      middle = 0.5 * (low + high)
+      low, high = (low, middle) if gap(middle) > 0.0 else (middle, high)
+    return high
 
   def _grasp(self) -> Float64Array:
     """The middle of the pads that meet, in a hand's base frame.
