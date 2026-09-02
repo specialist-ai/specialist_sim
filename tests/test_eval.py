@@ -8,7 +8,7 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
-from specialist_sim.eval import LIFT, Outcome, Region, Scatter, summary, sweep
+from specialist_sim.eval import LIFT, Outcome, Region, Scatter, _start, summary, sweep
 from specialist_sim.observation import flat_rows
 from specialist_sim.randomise import scattered
 
@@ -101,3 +101,12 @@ def test_a_region_never_draws_inside_its_hole() -> None:
     assert np.hypot(spot[0] - 0.49, spot[1]) >= 0.08
   with pytest.raises(ValueError, match="not negative"):
     Region(vertices=ring, hole=(0.49, 0.0, -0.01))
+
+
+def test_a_start_is_not_drawn_from_the_stream_the_hands_are() -> None:
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
+  starts = Scatter()
+  drawn = _start(env, starts, 7)
+  assert drawn is not None
+  same_stream = starts.draw(env.scene, np.random.default_rng(7))
+  assert not np.array_equal(drawn["cube"], same_stream)

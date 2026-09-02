@@ -169,7 +169,12 @@ def summary(
 
 
 def _start(env: PickPlaceEnv, starts: Start | None, seed: int) -> dict[str, Any] | None:
-  """Where this seed's episode opens, drawn from the seed itself."""
+  """Where this seed's episode opens, drawn from a stream of the seed's own.
+
+  The environment seeds its own draws — the hands' jitter — from the bare
+  seed; a start drawn from that same stream would take the same numbers, and
+  where the cube lies would be tied to where the hands begin.
+  """
   if starts is None:
     return None
-  return {"cube": starts.draw(env.scene, np.random.default_rng(seed))}
+  return {"cube": starts.draw(env.scene, np.random.default_rng([seed, 1]))}
