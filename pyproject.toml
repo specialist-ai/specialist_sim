@@ -12,7 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Reading the corpus a policy was trained on, to derive where its picks begin.
-corpus = ["specialist-corpus"]
+corpus = ["rerun-sdk[datafusion]>=0.36"]
 # The spaces as Gymnasium objects.
 gym = ["gymnasium>=1.3"]
 
@@ -26,9 +26,6 @@ dev = [
   # not import it.
   "gymnasium>=1.3",
 ]
-
-[tool.uv.sources]
-specialist-corpus = { git = "ssh://git@github.com/qiayuanl/specialist.git", subdirectory = "packages/specialist_corpus", branch = "master" }
 
 [build-system]
 requires = ["hatchling"]
@@ -63,6 +60,8 @@ module = [
   "warp", "warp.*",
   "gymnasium", "gymnasium.*",
   "pyarrow", "pyarrow.*",
+  "datafusion", "datafusion.*",
+  "rerun", "rerun.*",
 ]
 ignore_missing_imports = true
 
