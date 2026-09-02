@@ -22,10 +22,21 @@ from specialist_sim.arrays import Float64Array
 from specialist_sim.env import PickPlaceEnv
 from specialist_sim.observation import flat_row
 
-__all__ = ["LIFT", "Agent", "Outcome", "summary", "sweep"]
+__all__ = ["LIFT", "LIFTS", "PROTOCOL", "Agent", "Outcome", "summary", "sweep"]
 
 LIFT = 0.010
 """How far off the table the cube must come for an episode to count as a pick."""
+
+LIFTS = (0.006, 0.008, 0.010, 0.012)
+"""The lifts a summary also reports clean at, since the score turns on one."""
+
+PROTOCOL = 2
+"""The benchmark's revision, bumped by any change that moves an outcome for a
+fixed seed, so a logged score says which protocol it came from.
+
+1. The bench as first landed: the cube's start drawn from the episode's own stream.
+2. The start drawn from the seed's child stream, untangled from the hands' jitter.
+"""
 
 
 class Agent(Protocol):
@@ -55,7 +66,10 @@ class Outcome:
   @property
   def picked(self) -> bool:
     """Whether the cube was carried clear of the table, rather than nudged."""
-    return self.lift > LIFT and self.held_steps > 0
+    return self.picked_at(LIFT)
+
+  def picked_at(self, lift: float) -> bool:
+    return self.lift > lift and self.held_steps > 0
 
   @property
   def clean(self) -> bool:
@@ -142,6 +156,7 @@ def summary(
   for outcome in outcomes:
     buckets[outcome.bucket] += 1
   return {
+    "protocol": PROTOCOL,
     "episodes": len(outcomes),
     "budget": budget,
     "camera_lag": env.cfg.camera_lag,
@@ -153,5 +168,9 @@ def summary(
       float(np.mean([outcome.steps for outcome in wins])) if wins else float("nan")
     ),
     "lift": float(np.median([outcome.lift for outcome in outcomes])),
+    "clean_at_lift": {
+      lift: sum(o.success and o.picked_at(lift) for o in outcomes) / len(outcomes)
+      for lift in LIFTS
+    },
     "buckets": buckets,
   }

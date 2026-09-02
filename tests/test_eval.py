@@ -8,7 +8,7 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
-from specialist_sim.eval import LIFT, Outcome, summary, sweep
+from specialist_sim.eval import LIFT, LIFTS, PROTOCOL, Outcome, summary, sweep
 from specialist_sim.observation import flat_rows
 from specialist_sim.randomise import Region, Scatter, scattered
 from specialist_sim.spaces import GRIPPERS
@@ -44,6 +44,10 @@ def test_a_sweep_scores_every_seed_and_restarts_worlds_alone() -> None:
   )
   report = summary(outcomes, env, budget=4)
   assert report["episodes"] == 3 and report["success_rate"] == 0.0
+  assert report["protocol"] == PROTOCOL
+  assert (
+    set(report["clean_at_lift"]) == set(LIFTS) and report["clean_at_lift"][LIFT] == 0.0
+  )
   assert (report["budget"], report["camera_lag"], report["worlds"]) == (4, 0, 2)
   assert report["buckets"]["neither"] == 3
 
