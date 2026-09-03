@@ -131,3 +131,24 @@ from. Each take configures the environment with the cameras that recorded it:
 uv run --extra corpus python scripts/replay.py \
   --corpus ~/corpus --session canon002 --output overlay.mp4
 ```
+
+## Demonstrating the task in simulation
+
+The `replay` extra also writes episodes as a state layer, in the shape a
+recorded one has, so a trainer reads a demonstration exactly as it reads a
+capture. The cube starts on the tape; one hand kicks it somewhere it was not
+and the other picks it up and puts it back, so a cycle both poses the task and
+solves it. An episode repeats the cycle for eighty to a hundred and twenty
+seconds. Every goal is read off the scene when a stage begins, so the
+demonstration answers to where the cube actually is:
+
+```
+uv run --extra corpus python scripts/synthesise.py \
+  --corpus ~/corpus_sim --episodes 20
+```
+
+Each episode becomes a session under `state_s12_i1/`, holding per hand the
+images at the control rate and the pose, twist and finger opening at 100 Hz.
+An episode that does not finish the task is not written. Where a capture's
+layer records which solve it came from, a demonstration's records the seed that
+reproduces it.

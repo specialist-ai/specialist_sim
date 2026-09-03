@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -400,13 +400,19 @@ class PickPlaceEnv:
     mujoco.mj_forward(self.scene.model, data)
 
   def step(
-    self, action: Float64Array
+    self,
+    action: Float64Array,
+    watch: Callable[[int, Float64Array, Float64Array], None] | None = None,
   ) -> tuple[dict[str, Any], Float64Array, BoolArray, BoolArray, dict[str, Any]]:
     """Track the leading poses of a trajectory, and report where that leaves things.
 
     Every world is answered for along a leading axis, in reward, in what ended,
     and in everything an observation and its report carry, however many there
     are: a shape does not turn on how the environment was built.
+
+    ``watch`` sees each physics step by its index, with every world's joint
+    coordinates and velocities as that step left them, for a caller recording
+    the plant faster than a control step reports it.
     """
     self.ramp.process(action, self._driven)
     plant = self.plant
@@ -418,6 +424,8 @@ class PickPlaceEnv:
         self.ramp, substep, plant.qpos, plant.qvel, plant.ctrl, plant.xfrc
       )
       plant.substep()
+      if watch is not None:
+        watch(substep, plant.qpos, plant.qvel)
       if (substep + 1) % self._per_row:
         continue
       row = (substep + 1) // self._per_row
