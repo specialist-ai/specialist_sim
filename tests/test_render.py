@@ -1,4 +1,4 @@
-"""Each camera sees the room, the other hand, and not its own housing."""
+"""Each camera sees the room, the other hand, and not the shell it looks out of."""
 
 from dataclasses import replace
 from typing import Any
@@ -63,7 +63,8 @@ def test_a_camera_reports_which_body_each_pixel_struck(
     for slot, view in env.views.items()
   }
   own, other = GRIPPERS
-  assert f"{own}_base" not in seen[own]
+  # A hand sees the rig it rides, its own base included, and the other hand's.
+  assert f"{own}_base" in seen[own]
   assert f"{own}_base" in seen[other]
   assert {"table", "cube"} <= seen[own]
 
@@ -123,3 +124,17 @@ def test_a_body_lands_on_the_pixel_the_lens_projects_it_to() -> None:
     column, row = int(round(pixel[0])), int(round(pixel[1]))
     struck = env.views[GRIPPERS[0]].body[row, column]
     assert mujoco.mj_id2name(scene.model, mujoco.mjtObj.mjOBJ_BODY, int(struck)) == name
+
+
+def test_a_camera_is_blind_to_the_shell_it_looks_out_of() -> None:
+  """Only its own shell: a hand hides no part of the other hand's camera."""
+  env = PickPlaceEnv()
+  env.reset(seed=3)
+  model, renderer = env.scene.model, env.renderer
+  assert renderer is not None
+  for slot in GRIPPERS:
+    blind = {
+      mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, renderer.parts[part].geom)
+      for part in np.flatnonzero(renderer.cameras[slot].seen.numpy() == 0)
+    }
+    assert blind == {f"{slot}_camera_shell{index}" for index in range(5)}

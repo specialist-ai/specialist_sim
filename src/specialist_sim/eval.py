@@ -44,7 +44,7 @@ LIFT = 0.010
 LIFTS = (0.006, 0.008, 0.010, 0.012)
 """The lifts a summary also reports clean at, since the score turns on one."""
 
-PROTOCOL = 3
+PROTOCOL = 4
 """The benchmark's revision, bumped by any change that moves an outcome for a
 fixed seed, so a logged score says which protocol it came from.
 
@@ -53,6 +53,10 @@ fixed seed, so a logged score says which protocol it came from.
 3. Every start drawn from the episode's own stream by the task, the cube turned
    off the tape as on it; an undriven hand held at its commanded setpoint; the
    bench names each episode's seed to the agent.
+4. The gripper rebuilt from the current description: one visual mesh per rigid
+   part, the tips and their grip tape collided as CoACD hulls and the structure
+   as scad primitives, and the inertia each link actually carries. The pads meet
+   elsewhere, so a grasp closes to a different opening.
 """
 
 

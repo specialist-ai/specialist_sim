@@ -15,25 +15,67 @@
   </default>
 
   <asset>
-    <mesh name="base_visual" file="meshes/base_visual.stl"/>
-    <mesh name="base_collision" file="meshes/base_collision.stl"/>
-    <mesh name="left_finger_visual" file="meshes/left_finger_visual.stl"/>
-    <mesh name="left_finger_pad1" file="collision/left_finger_visual_collision_1.stl"/>
-    <mesh name="left_finger_pad2" file="collision/left_finger_visual_collision_2.stl"/>
-    <mesh name="left_finger_pad7" file="collision/left_finger_visual_collision_7.stl"/>
-    <mesh name="left_finger_pad8" file="collision/left_finger_visual_collision_8.stl"/>
-    <mesh name="left_finger_pad9" file="collision/left_finger_visual_collision_9.stl"/>
-    <mesh name="left_finger_pad10" file="collision/left_finger_visual_collision_10.stl"/>
-    <mesh name="left_finger_pad11" file="collision/left_finger_visual_collision_11.stl"/>
-    <mesh name="right_finger_visual" file="meshes/right_finger_visual.stl"/>
-    <mesh name="right_finger_pad1" file="collision/right_finger_visual_collision_1.stl"/>
-    <mesh name="right_finger_pad2" file="collision/right_finger_visual_collision_2.stl"/>
-    <mesh name="right_finger_pad6" file="collision/right_finger_visual_collision_6.stl"/>
-    <mesh name="right_finger_pad7" file="collision/right_finger_visual_collision_7.stl"/>
-    <mesh name="right_finger_pad8" file="collision/right_finger_visual_collision_8.stl"/>
-    <mesh name="right_finger_pad9" file="collision/right_finger_visual_collision_9.stl"/>
-    <mesh name="right_finger_pad10" file="collision/right_finger_visual_collision_10.stl"/>
-    <mesh name="right_finger_pad11" file="collision/right_finger_visual_collision_11.stl"/>
+    <mesh name="mount_insta_cover" file="visual/mount_insta_cover.stl"/>
+    <mesh name="hex_socket_head_cap_screw_m3x0_50_x_25" file="visual/hex_socket_head_cap_screw_m3x0_50_x_25.stl"/>
+    <mesh name="mount_power_cover" file="visual/mount_power_cover.stl"/>
+    <mesh name="base_bottom_actuated" file="visual/base_bottom_actuated.stl"/>
+    <mesh name="protector" file="visual/protector.stl"/>
+    <mesh name="mount_bottom_cap" file="visual/mount_bottom_cap.stl"/>
+    <mesh name="base_top_actuated" file="visual/base_top_actuated.stl"/>
+    <mesh name="mount" file="visual/mount.stl"/>
+    <mesh name="x3_v5" file="visual/x3_v5.stl"/>
+    <mesh name="x3_v5__2" file="visual/x3_v5__2.stl"/>
+    <mesh name="battery" file="visual/battery.stl"/>
+    <mesh name="battery__2" file="visual/battery__2.stl"/>
+    <mesh name="usb_c_cap" file="visual/usb_c_cap.stl"/>
+    <mesh name="x3_v5__3" file="visual/x3_v5__3.stl"/>
+    <mesh name="x3_v5__4" file="visual/x3_v5__4.stl"/>
+    <mesh name="x3_v5__5" file="visual/x3_v5__5.stl"/>
+    <mesh name="metal_horn_active_v2_1" file="visual/metal_horn_active_v2_1.stl"/>
+    <mesh name="sg_ziji_15_1" file="visual/sg_ziji_15_1.stl"/>
+    <mesh name="xg_ziji_16_1" file="visual/xg_ziji_16_1.stl"/>
+    <mesh name="zk_122_1" file="visual/zk_122_1.stl"/>
+    <mesh name="left_tip" file="visual/left_tip.stl"/>
+    <mesh name="left_tip_00000" file="collision/left_tip_00000.stl"/>
+    <mesh name="left_tip_00001" file="collision/left_tip_00001.stl"/>
+    <mesh name="left_tip_00002" file="collision/left_tip_00002.stl"/>
+    <mesh name="left_tip_00003" file="collision/left_tip_00003.stl"/>
+    <mesh name="left_tip_00004" file="collision/left_tip_00004.stl"/>
+    <mesh name="left_tip_00005" file="collision/left_tip_00005.stl"/>
+    <mesh name="left_tip_00006" file="collision/left_tip_00006.stl"/>
+    <mesh name="left_tip_00007" file="collision/left_tip_00007.stl"/>
+    <mesh name="left_tip_00008" file="collision/left_tip_00008.stl"/>
+    <mesh name="left_tip_00009" file="collision/left_tip_00009.stl"/>
+    <mesh name="left_tip_00010" file="collision/left_tip_00010.stl"/>
+    <mesh name="left_tip_00011" file="collision/left_tip_00011.stl"/>
+    <mesh name="left_finger_actuated" file="visual/left_finger_actuated.stl"/>
+    <mesh name="left_tip_grip_tape" file="visual/left_tip_grip_tape.stl"/>
+    <mesh name="left_tip_grip_tape_00000" file="collision/left_tip_grip_tape_00000.stl"/>
+    <mesh name="left_tip_grip_tape_00001" file="collision/left_tip_grip_tape_00001.stl"/>
+    <mesh name="left_tip_grip_tape_00002" file="collision/left_tip_grip_tape_00002.stl"/>
+    <mesh name="left_tip_grip_tape_00003" file="collision/left_tip_grip_tape_00003.stl"/>
+    <mesh name="left_tip_grip_tape_00004" file="collision/left_tip_grip_tape_00004.stl"/>
+    <mesh name="right_tip" file="visual/right_tip.stl"/>
+    <mesh name="right_tip_00000" file="collision/right_tip_00000.stl"/>
+    <mesh name="right_tip_00001" file="collision/right_tip_00001.stl"/>
+    <mesh name="right_tip_00002" file="collision/right_tip_00002.stl"/>
+    <mesh name="right_tip_00003" file="collision/right_tip_00003.stl"/>
+    <mesh name="right_tip_00004" file="collision/right_tip_00004.stl"/>
+    <mesh name="right_tip_00005" file="collision/right_tip_00005.stl"/>
+    <mesh name="right_tip_00006" file="collision/right_tip_00006.stl"/>
+    <mesh name="right_tip_00007" file="collision/right_tip_00007.stl"/>
+    <mesh name="right_tip_00008" file="collision/right_tip_00008.stl"/>
+    <mesh name="right_tip_00009" file="collision/right_tip_00009.stl"/>
+    <mesh name="right_tip_00010" file="collision/right_tip_00010.stl"/>
+    <mesh name="right_tip_00011" file="collision/right_tip_00011.stl"/>
+    <mesh name="right_tip_00012" file="collision/right_tip_00012.stl"/>
+    <mesh name="right_finger_actuated" file="visual/right_finger_actuated.stl"/>
+    <mesh name="right_tip_grip_tape" file="visual/right_tip_grip_tape.stl"/>
+    <mesh name="right_tip_grip_tape_00000" file="collision/right_tip_grip_tape_00000.stl"/>
+    <mesh name="right_tip_grip_tape_00001" file="collision/right_tip_grip_tape_00001.stl"/>
+    <mesh name="right_tip_grip_tape_00002" file="collision/right_tip_grip_tape_00002.stl"/>
+    <mesh name="right_tip_grip_tape_00003" file="collision/right_tip_grip_tape_00003.stl"/>
+    <mesh name="right_tip_grip_tape_00004" file="collision/right_tip_grip_tape_00004.stl"/>
   </asset>
 
   <worldbody>
@@ -41,47 +83,102 @@
       <inertial pos="0 0 0" mass="1e-06" diaginertia="1e-09 1e-09 1e-09"/>
       <joint name="rig" type="free"/>
       <body name="base" gravcomp="1">
-        <inertial pos="-0.0210668 6.15986e-05 -0.0241909" quat="-0.00513176 0.447537 -0.00360384 0.894243" mass="0.108363" diaginertia="6.71405e-05 5.56849e-05 3.35654e-05"/>
-        <geom class="visual" pos="-0.0210668 6.15986e-05 -0.0241909" rgba="0.213868 0.215349 0.216695 1" mesh="base_visual"/>
-        <geom type="mesh" pos="-0.0210668 6.15986e-05 -0.0241909" mesh="base_collision"/>
+        <inertial pos="-0.0265752 -0.000395007 -0.0367357" quat="0.767371 -0.0276312 -0.0225351 0.640212" mass="0.303633" diaginertia="0.000629618 0.000620405 0.000189703"/>
+        <geom class="visual" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="mount_insta_cover"/>
+        <geom class="visual" pos="-0.018 -0.0125 0" quat="1.32679e-06 0 0 1" rgba="0.603922 0.647059 0.686275 1" mesh="hex_socket_head_cap_screw_m3x0_50_x_25"/>
+        <geom class="visual" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="mount_power_cover"/>
+        <geom class="visual" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="base_bottom_actuated"/>
+        <geom class="visual" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="protector"/>
+        <geom class="visual" pos="0 0 0" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="mount_bottom_cap"/>
+        <geom class="visual" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="base_top_actuated"/>
+        <geom class="visual" pos="0 0 0" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="mount"/>
+        <geom class="visual" pos="-0.018 0.0125 0" quat="1.32679e-06 0 0 1" rgba="0.603922 0.647059 0.686275 1" mesh="hex_socket_head_cap_screw_m3x0_50_x_25"/>
+        <geom class="visual" name="camera_shell0" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.34902 0.34902 0.34902 1" mesh="x3_v5"/>
+        <geom class="visual" name="camera_shell1" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.0980392 0.0980392 0.0980392 1" mesh="x3_v5__2"/>
+        <geom class="visual" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.34902 0.34902 0.34902 1" mesh="battery"/>
+        <geom class="visual" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.184314 0.184314 0.184314 1" mesh="battery__2"/>
+        <geom class="visual" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.34902 0.34902 0.34902 1" mesh="usb_c_cap"/>
+        <geom class="visual" name="camera_shell2" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.796078 0.796078 0.796078 1" mesh="x3_v5__3"/>
+        <geom class="visual" name="camera_shell3" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.796078 0.796078 0.796078 1" mesh="x3_v5__4"/>
+        <geom class="visual" name="camera_shell4" pos="-0.0568079 0 -0.0453914" quat="0.696363 -0.122788 0.122788 -0.696366" rgba="0.0980392 0.0980392 0.0980392 1" mesh="x3_v5__5"/>
+        <geom class="visual" pos="0 0.013 -0.0294" quat="0.499998 0.5 0.500002 0.5" rgba="0.960784 0.960784 0.964706 1" mesh="metal_horn_active_v2_1"/>
+        <geom class="visual" pos="0 0.013 -0.0294" quat="0.499998 0.5 0.500002 0.5" rgba="0.0980392 0.0980392 0.0980392 1" mesh="sg_ziji_15_1"/>
+        <geom class="visual" pos="0 0.013 -0.0294" quat="0.499998 0.5 0.500002 0.5" rgba="0.0980392 0.0980392 0.0980392 1" mesh="xg_ziji_16_1"/>
+        <geom class="visual" pos="0 0.013 -0.0294" quat="0.499998 0.5 0.500002 0.5" rgba="0.0980392 0.0980392 0.0980392 1" mesh="zk_122_1"/>
+        <geom size="0.025075 0.02951 0.039745" pos="-0.02484 0 -0.02561" quat="0.472867 0.525818 0.524486 0.474159" type="box" rgba="0.2 0.2 0.2 1" contype="2" conaffinity="1"/>
+        <geom size="0.0275 0.028 0.037355" pos="-0.01568 0 -0.06833" quat="1.08685e-06 0.819152 7.61018e-07 -0.573576" type="box" rgba="0.2 0.2 0.2 1" contype="2" conaffinity="1"/>
+        <geom size="0.02075 0.028 0.0595" pos="-0.03387 0 0.00958" quat="1.30664e-06 0.984808 2.30396e-07 -0.173648" type="box" rgba="0.2 0.2 0.2 1" contype="2" conaffinity="1"/>
         <body name="base_tag" gravcomp="1">
           <inertial pos="0 0 0" mass="1e-09" diaginertia="0 0 0"/>
         </body>
-        <body name="left_finger" pos="3.07388e-06 0.0120031 -0.008" gravcomp="1">
-          <inertial pos="0.0389077 0.0137251 -0.00917294" quat="-0.0850417 0.723682 -0.0908144 0.678826" mass="0.0384969" diaginertia="3.69765e-05 3.61868e-05 4.9303e-06"/>
-          <joint name="left_finger" class="finger" range="-0.261799 0.698132"/>
-          <geom class="visual" pos="0.0389077 0.0137251 -0.00917294" rgba="0.453575 0.436406 0.132644 1" mesh="left_finger_visual"/>
-          <geom name="left_finger_pad1" class="pad" pos="0.0389077 0.0137251 -0.00917294" mesh="left_finger_pad1"/>
-          <geom name="left_finger_pad2" class="pad" pos="0.0389077 0.0137251 -0.00917294" mesh="left_finger_pad2"/>
-          <geom name="left_finger_pad7" class="pad" pos="0.0389077 0.0137251 -0.00917294" mesh="left_finger_pad7"/>
-          <geom name="left_finger_pad8" class="pad" pos="0.0389077 0.0137251 -0.00917294" mesh="left_finger_pad8"/>
-          <geom name="left_finger_pad9" class="pad" pos="0.0389077 0.0137251 -0.00917294" mesh="left_finger_pad9"/>
-          <geom name="left_finger_pad10" class="pad" pos="0.0389077 0.0137251 -0.00917294" mesh="left_finger_pad10"/>
-          <geom name="left_finger_pad11" class="pad" pos="0.0389077 0.0137251 -0.00917294" mesh="left_finger_pad11"/>
-          <body name="left_finger_tag" pos="0.0399969 0.0229969 0" gravcomp="1">
-            <inertial pos="0 0 0" mass="1e-09" diaginertia="0 0 0"/>
-          </body>
-        </body>
-        <body name="right_finger" pos="3.07388e-06 -0.0119969 -0.008" gravcomp="1">
-          <inertial pos="0.0394602 -0.013925 -0.00924449" quat="0.103703 0.719274 0.117418 0.676834" mass="0.0379481" diaginertia="3.60315e-05 3.53215e-05 4.79291e-06"/>
-          <joint name="right_finger" class="finger" range="-0.698132 0.261799"/>
-          <geom class="visual" pos="0.0394602 -0.013925 -0.00924449" rgba="0.457242 0.439824 0.13167 1" mesh="right_finger_visual"/>
-          <geom name="right_finger_pad1" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad1"/>
-          <geom name="right_finger_pad2" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad2"/>
-          <geom name="right_finger_pad6" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad6"/>
-          <geom name="right_finger_pad7" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad7"/>
-          <geom name="right_finger_pad8" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad8"/>
-          <geom name="right_finger_pad9" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad9"/>
-          <geom name="right_finger_pad10" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad10"/>
-          <geom name="right_finger_pad11" class="pad" pos="0.0394602 -0.013925 -0.00924449" mesh="right_finger_pad11"/>
-          <body name="right_finger_tag" pos="0.0399969 -0.0230031 0" gravcomp="1">
-            <inertial pos="0 0 0" mass="1e-09" diaginertia="0 0 0"/>
-          </body>
-        </body>
         <body name="lens"/>
+        <body name="left_finger" pos="0 0.0125 -0.00802" gravcomp="1">
+          <inertial pos="0.0396313 0.0139137 -0.00944722" quat="-0.0806981 0.724413 -0.0945666 0.678064" mass="0.0408886" diaginertia="3.8214e-05 3.75873e-05 5.3809e-06"/>
+          <joint name="left_finger" class="finger" range="-0.261799 0.698132"/>
+          <geom class="visual" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" rgba="0.952941 0.901961 0 1" mesh="left_tip"/>
+          <geom class="visual" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="left_finger_actuated"/>
+          <geom class="visual" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" rgba="0 0 0 1" mesh="left_tip_grip_tape"/>
+          <geom name="left_finger_pad0" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00000"/>
+          <geom name="left_finger_pad1" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00001"/>
+          <geom name="left_finger_pad2" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00002"/>
+          <geom name="left_finger_pad3" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00003"/>
+          <geom name="left_finger_pad4" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00004"/>
+          <geom name="left_finger_pad5" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00005"/>
+          <geom name="left_finger_pad6" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00006"/>
+          <geom name="left_finger_pad7" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00007"/>
+          <geom name="left_finger_pad8" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00008"/>
+          <geom name="left_finger_pad9" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00009"/>
+          <geom name="left_finger_pad10" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00010"/>
+          <geom name="left_finger_pad11" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_00011"/>
+          <geom name="left_finger_pad12" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_grip_tape_00000"/>
+          <geom name="left_finger_pad13" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_grip_tape_00001"/>
+          <geom name="left_finger_pad14" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_grip_tape_00002"/>
+          <geom name="left_finger_pad15" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_grip_tape_00003"/>
+          <geom name="left_finger_pad16" class="pad" pos="0 -0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="left_tip_grip_tape_00004"/>
+          <geom size="0.02379 0.0131 0.00489" pos="0.00247 0.01036 -0.00489" quat="0.707105 0 0 -0.707108" type="box" rgba="0.952941 0.901961 0 1" contype="2" conaffinity="1"/>
+          <geom size="0.01348 0.02721 0.00489" pos="0.04279 0.02102 -0.00489" quat="0.707105 0 0 -0.707108" type="box" rgba="0.952941 0.901961 0 1" contype="2" conaffinity="1"/>
+          <body name="left_finger_tag" pos="0.04 0.0225 0" gravcomp="1">
+            <inertial pos="0 0 0" mass="1e-09" diaginertia="0 0 0"/>
+          </body>
+        </body>
+        <body name="right_finger" pos="0 -0.0125 -0.008" gravcomp="1">
+          <inertial pos="0.0390857 -0.0137341 -0.00952115" quat="0.0995377 0.720739 0.107623 0.677529" mass="0.0414614" diaginertia="3.91919e-05 3.84208e-05 5.48277e-06"/>
+          <joint name="right_finger" class="finger" range="-0.698132 0.261799"/>
+          <geom class="visual" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" rgba="0.952941 0.901961 0 1" mesh="right_tip"/>
+          <geom class="visual" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" rgba="0.2 0.2 0.2 1" mesh="right_finger_actuated"/>
+          <geom class="visual" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" rgba="0 0 0 1" mesh="right_tip_grip_tape"/>
+          <geom name="right_finger_pad0" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00000"/>
+          <geom name="right_finger_pad1" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00001"/>
+          <geom name="right_finger_pad2" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00002"/>
+          <geom name="right_finger_pad3" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00003"/>
+          <geom name="right_finger_pad4" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00004"/>
+          <geom name="right_finger_pad5" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00005"/>
+          <geom name="right_finger_pad6" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00006"/>
+          <geom name="right_finger_pad7" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00007"/>
+          <geom name="right_finger_pad8" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00008"/>
+          <geom name="right_finger_pad9" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00009"/>
+          <geom name="right_finger_pad10" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00010"/>
+          <geom name="right_finger_pad11" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00011"/>
+          <geom name="right_finger_pad12" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_00012"/>
+          <geom name="right_finger_pad13" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_grip_tape_00000"/>
+          <geom name="right_finger_pad14" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_grip_tape_00001"/>
+          <geom name="right_finger_pad15" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_grip_tape_00002"/>
+          <geom name="right_finger_pad16" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_grip_tape_00003"/>
+          <geom name="right_finger_pad17" class="pad" pos="0 0.0125 0.008" quat="0.707105 0 0 -0.707108" mesh="right_tip_grip_tape_00004"/>
+          <geom size="0.02382 0.01308 0.00489" pos="0.00258 -0.01032 -0.00489" quat="0.707105 0 0 -0.707108" type="box" rgba="0.952941 0.901961 0 1" contype="2" conaffinity="1"/>
+          <geom size="0.01331 0.02717 0.00489" pos="0.04283 -0.02119 -0.00489" quat="0.707105 0 0 -0.707108" type="box" rgba="0.952941 0.901961 0 1" contype="2" conaffinity="1"/>
+          <body name="right_finger_tag" pos="0.04 -0.0225 0" gravcomp="1">
+            <inertial pos="0 0 0" mass="1e-09" diaginertia="0 0 0"/>
+          </body>
+        </body>
       </body>
     </body>
   </worldbody>
+
+  <contact>
+    <exclude body1="base" body2="left_finger"/>
+    <exclude body1="base" body2="right_finger"/>
+  </contact>
 
   <equality>
     <joint joint1="left_finger" joint2="right_finger" polycoef="0 -1 0 0 0"/>

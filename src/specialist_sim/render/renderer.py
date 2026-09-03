@@ -8,6 +8,7 @@ and differ only in which they may see.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import mujoco
@@ -132,13 +133,27 @@ class Renderer:
     return out
 
   def _housing(self, model: mujoco.MjModel, name: str, camera: CameraCfg) -> set[int]:
-    """What a lens sits inside, and so cannot see."""
-    if not camera.housed:
+    """What a lens looks out from, and so cannot see.
+
+    The shell is picked out geom by geom rather than by the body carrying it,
+    because the whole rig rides one body: hiding that would blind a hand to its
+    own mount and fingers, which the real camera sees.
+    """
+    if camera.housing is None:
       return set()
-    base = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{name}_base")
-    if base < 0:
-      raise ValueError(f"{name} is housed, and the scene has no {name}_base body")
-    return {index for index, part in enumerate(self.parts) if part.body == base}
+    shell = re.compile(f"{re.escape(name)}_{camera.housing}")
+    hidden = {
+      index
+      for index, part in enumerate(self.parts)
+      if shell.fullmatch(
+        mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, part.geom) or ""
+      )
+    }
+    if not hidden:
+      raise ValueError(
+        f"{name} looks out from {camera.housing}, which it has no geom of"
+      )
+    return hidden
 
   def _lights(
     self, model: mujoco.MjModel

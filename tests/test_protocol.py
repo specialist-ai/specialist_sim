@@ -17,9 +17,9 @@ PATCH = Region(
   hole=(0.49, 0.0, 0.08),
 )
 GOLDEN = {
-  3: {
+  4: {
     "bimanual": ("1d08b1f9e19ea55d", "46f86ac71b8dc782"),
-    "right": ("1bdb6d32f6852148", "840b40a40e3f8e79"),
+    "right": ("9a0b28a6f54aff71", "c0aaa372b9e93fc1"),
     "left": ("1d08b1f9e19ea55d", "46f86ac71b8dc782"),
   }
 }
