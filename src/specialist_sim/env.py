@@ -18,6 +18,7 @@ from typing import Any
 
 import mujoco
 import numpy as np
+import specialist_description
 from mujoco import rollout
 
 from specialist_sim import randomise, spaces
@@ -25,7 +26,13 @@ from specialist_sim.action import ActionCfg, Ramp
 from specialist_sim.arrays import BoolArray, Float64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
 from specialist_sim.control import XFRC, ControllerCfg
-from specialist_sim.embodiment import ASSETS, EmbodimentCfg, FloatingCfg, OutOfReach
+from specialist_sim.embodiment import (
+  ASSETS,
+  VARIANT,
+  EmbodimentCfg,
+  FloatingCfg,
+  OutOfReach,
+)
 from specialist_sim.render import Renderer, seat
 from specialist_sim.scene import Scene, SceneCfg
 from specialist_sim.spaces import F_STEP, HORIZON, PER_HAND
@@ -276,12 +283,14 @@ class PickPlaceEnv:
   @property
   def revision(self) -> str:
     """A hash of everything that decides what this environment does with a
-    seed: the scene's assets, the configuration and the physics engine."""
+    seed: the room, the gripper it is described with, the configuration and the
+    physics engine."""
     digest = hashlib.sha256()
-    for path in sorted(ASSETS.rglob("*")):
-      if path.is_file():
-        digest.update(path.relative_to(ASSETS).as_posix().encode())
-        digest.update(path.read_bytes())
+    for root in (ASSETS, specialist_description.variant_dir(VARIANT)):
+      for path in sorted(root.rglob("*")):
+        if path.is_file():
+          digest.update(path.relative_to(root).as_posix().encode())
+          digest.update(path.read_bytes())
     digest.update(repr(self.cfg).encode())
     digest.update(mujoco.__version__.encode())
     return digest.hexdigest()[:12]

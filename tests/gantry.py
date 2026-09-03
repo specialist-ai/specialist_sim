@@ -106,16 +106,30 @@ class JointServoCfg:
   """Each joint's servo sent the closed-form configuration of the ramp's setpoint."""
 
   def build(self, scene: Scene, ramp: Ramp) -> JointServo:
-    return JointServo(scene.hands)
+    return JointServo(scene)
 
 
 class JointServo:
   drives = CTRL
 
-  def __init__(self, hands: Sequence[Hand]):
+  def __init__(self, scene: Scene):
+    hands = scene.hands
     chains = [carried(hand, ChainHand) for hand in hands]
     self._slides = np.asarray([hand.motors[:3] for hand in chains], np.int64)
     self._hinges = np.asarray([hand.motors[3:] for hand in chains], np.int64)
+    model = scene.model
+    weight = abs(float(model.opt.gravity[2]))
+    self._lift = np.asarray(
+      [
+        weight
+        * float(model.body_subtreemass[hand.base])
+        / model.actuator_gainprm[at][0]
+        for hand, at in zip(chains, self._slides[:, 2], strict=True)
+      ],
+      np.float64,
+    )
+    """How far above its setpoint the standing slide is sent to hold the
+    gripper's weight."""
     self.servos = FingerServos(hands)
 
   def reset(self, datas: Sequence[mujoco.MjData], worlds: Sequence[int]) -> None:
@@ -131,6 +145,7 @@ class JointServo:
     xfrc: Float64Array,
   ) -> None:
     ctrl[:, self._slides] = ramp.position[:, substep]
+    ctrl[:, self._slides[:, 2]] += self._lift
     ctrl[:, self._hinges] = euler_zyx(ramp.quaternion[:, substep])
     self.servos.command(ctrl, ramp.opening[:, substep])
 

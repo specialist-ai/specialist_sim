@@ -574,12 +574,18 @@ wheels = [
 ]
 
 [[package]]
+name = "specialist-description"
+version = "0.5.0"
+source = { git = "ssh://git@github.com/specialist-ai/specialist_description.git?branch=main#eedc96d4a11aa9d623570e64f4b297b992163362" }
+
+[[package]]
 name = "specialist-sim"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "mujoco" },
     { name = "numpy" },
+    { name = "specialist-description" },
     { name = "warp-lang" },
 ]
 
@@ -606,6 +612,7 @@ requires-dist = [
     { name = "mujoco", specifier = ">=3.12" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "rerun-sdk", extras = ["datafusion"], marker = "extra == 'corpus'", specifier = ">=0.36" },
+    { name = "specialist-description", git = "ssh://git@github.com/specialist-ai/specialist_description.git?branch=main" },
     { name = "warp-lang", specifier = ">=1.16" },
 ]
 provides-extras = ["corpus", "gym"]
