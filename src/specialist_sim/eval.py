@@ -50,8 +50,10 @@ fixed seed, so a logged score says which protocol it came from.
 
 Under this one every start is drawn from the episode's own stream by the task,
 the cube turned off the tape as on it; a hand the task does not drive is held
-at its commanded setpoint; the bench names each episode's seed to the agent;
-and a trajectory is tracked wherever it points.
+at its commanded setpoint; the bench names each episode's seed to the agent; a
+trajectory is tracked wherever it points; and a geom is shaded the colour the
+visualiser resolves for it, whether that comes from a material or from an rgba
+of its own.
 """
 
 
