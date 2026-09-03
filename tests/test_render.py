@@ -12,6 +12,7 @@ from specialist_sim.calibration import CameraCfg
 from specialist_sim.embodiment import EmbodimentCfg
 from specialist_sim.mei import mei_project, mei_unproject
 from specialist_sim.rays import build_rays
+from specialist_sim.render.scene import gather
 from specialist_sim.spaces import GRIPPERS
 
 
@@ -123,3 +124,43 @@ def test_a_body_lands_on_the_pixel_the_lens_projects_it_to() -> None:
     column, row = int(round(pixel[0])), int(round(pixel[1]))
     struck = env.views[GRIPPERS[0]].body[row, column]
     assert mujoco.mj_id2name(scene.model, mujoco.mjtObj.mjOBJ_BODY, int(struck)) == name
+
+
+MATERIALS = """
+<mujoco>
+  <asset>
+    <material name="ink" rgba="0.078 0.078 0.078 1"/>
+    <material name="chalk" rgba="0.867 0.867 0.867 1"/>
+  </asset>
+  <worldbody>
+    <geom name="inked" type="box" size="0.1 0.1 0.1" group="1" material="ink"/>
+    <geom name="chalked" type="box" size="0.1 0.1 0.1" group="1" material="chalk"/>
+    <geom name="painted" type="box" size="0.1 0.1 0.1" group="1" material="ink"
+          rgba="0.9 0.4 0.1 1"/>
+  </worldbody>
+</mujoco>
+"""
+
+
+def _albedo(model: mujoco.MjModel) -> dict[str, Any]:
+  """Each named geom's colour, as the tracer will shade it."""
+  return {
+    mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, part.geom): part.albedo
+    for part in gather(model)
+  }
+
+
+def test_a_geom_is_shaded_by_the_material_it_carries() -> None:
+  model = mujoco.MjModel.from_xml_string(MATERIALS)
+  shaded = _albedo(model)
+  assert shaded["inked"] == pytest.approx([0.078] * 3, abs=1e-6)
+  assert shaded["chalked"] == pytest.approx([0.867] * 3, abs=1e-6)
+  inked = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "inked")
+  assert model.geom_rgba[inked][:3] == pytest.approx([0.5] * 3), (
+    "the compiled model keeps the default here, so the material is the colour"
+  )
+
+
+def test_a_geom_that_sets_its_own_rgba_overrides_its_material() -> None:
+  model = mujoco.MjModel.from_xml_string(MATERIALS)
+  assert _albedo(model)["painted"] == pytest.approx([0.9, 0.4, 0.1], abs=1e-6)
