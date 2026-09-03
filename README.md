@@ -120,3 +120,14 @@ episode exactly; the state names every hand the room holds, eight numbers each:
 ```python
 env.reset(seed=0, options={"state": start, "cube": (0.52, 0.06)})
 ```
+
+## Replaying a recorded take
+
+The `replay` extra adds the corpus reader and drives the environment
+from a solved session, drawing each simulated view over the footage it came
+from. Each take configures the environment with the cameras that recorded it:
+
+```
+uv run --extra corpus python scripts/replay.py \
+  --corpus ~/corpus --session canon002 --output overlay.mp4
+```
