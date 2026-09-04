@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -29,7 +30,7 @@ from specialist_sim.corpus.state import (
   rollout,
   write_layer,
 )
-from specialist_sim.expert import Expert
+from specialist_sim.expert import Expert, ExpertCfg
 from specialist_sim.spaces import GRIPPERS
 
 
@@ -41,7 +42,34 @@ def main() -> None:
   parser.add_argument("--size", type=int, default=240)
   parser.add_argument("--max-steps", type=int, default=2000)
   parser.add_argument("--revision", type=str, default=None)
+  parser.add_argument(
+    "--cfg",
+    action="append",
+    default=[],
+    metavar="FIELD=VALUE",
+    help="Override one ExpertCfg field, e.g. --cfg bite=0.02 --cfg kick=0.35,0.10. "
+    "Tuple fields take comma-separated values. Repeatable; a demonstration's "
+    "style is what decides whether a corpus matches the recordings, so it is "
+    "worth sweeping without editing the defaults.",
+  )
   args = parser.parse_args()
+
+  cfg = ExpertCfg()
+  for setting in args.cfg:
+    field, _, written = setting.partition("=")
+    if not hasattr(cfg, field):
+      raise SystemExit(f"ExpertCfg has no field {field!r}")
+    current = getattr(cfg, field)
+    parsed: object
+    if isinstance(current, tuple):
+      parsed = tuple(float(part) for part in written.split(","))
+      if len(parsed) != len(current):
+        raise SystemExit(f"{field} takes {len(current)} values, not {len(parsed)}")
+    else:
+      parsed = float(written)
+    cfg = replace(cfg, **{field: parsed})
+  if args.cfg:
+    print("expert overrides: " + "  ".join(args.cfg))
 
   sha = args.revision or revision()
   env = PickPlaceEnv(PickPlaceCfg(image_size=args.size, max_steps=10**6))
@@ -52,14 +80,21 @@ def main() -> None:
   # until the count asked for is the count written.
   seed, last = args.seed, args.seed + 2 * args.episodes
   while written < args.episodes and seed < last:
-    expert = Expert(env, np.random.default_rng(seed))
+    expert = Expert(env, np.random.default_rng(seed), cfg)
     started_at = time.time_ns()
     kept = rollout(env, expert, seed, args.max_steps)
     # An episode runs many cycles, so the one that matters is the last, and a
     # rollout cut short by its step limit stops in the middle of one.
     if not (expert.done and env.judge.info()["settled"]):
       refused += 1
-      print(f"  seed {seed}: the demonstration did not finish the task, dropped")
+      why = (
+        "the cube left the table"
+        if env.judge.info()["dropped"]
+        else "it ran out of steps mid-cycle"
+        if not expert.done
+        else "it stopped with the cube off the tape"
+      )
+      print(f"  seed {seed}: the demonstration did not finish the task -- {why}")
       seed += 1
       continue
     session = f"sim{seed:04d}"
