@@ -29,7 +29,7 @@ __all__ = [
 
 HOME_XY = ((0.47, 0.16), (0.47, -0.16))
 """Where each hand rests. The operator's left is the room's +y, which is the
-side the wall of that name stands on."""
+side the left anchor stands on."""
 HOME_HEIGHT = 0.18
 """How far above the table a hand rests."""
 # The fingers point across the table at the other hand, 40 degrees nose down.
