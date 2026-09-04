@@ -24,12 +24,24 @@
              gridsize="3 4" gridlayout=".U..LFRB.D.."/>
   </asset>
 
+  <!-- The table and the lights are set against the recordings rather than to
+       taste. A wrist frame is mostly table, and this one read brighter, harder
+       and colder than the room's: over sixty frames the bright half of the disc
+       averaged (230, 230, 223) against the recordings' (220, 210, 205), and its
+       luminance ran from a median of 111 to a 90th percentile of 228 where the
+       recordings run 142 to 204 -- twice the dynamic range. Nothing was
+       clipping; it was contrast and colour temperature.
+       The albedo carries the colour. The light balance carries the contrast:
+       diffuse moved into ambient until a shadowed up-facing surface sits 1/1.35
+       of a lit one instead of 1/1.71, holding the total on an up-facing surface
+       at what it was, because the skybox arrives already exposed and the geoms
+       were matched to it by eye. -->
   <worldbody>
     <body name="scene_view"/>
-    <light dir="0.282216 0.188144 -0.940721" diffuse="0.5 0.5 0.5" type="directional"/>
-    <light castshadow="false" dir="-0.646997 -0.539164 -0.539164" ambient="0.5 0.5 0.5" diffuse="0.3 0.3 0.3" type="directional"/>
+    <light dir="0.282216 0.188144 -0.940721" diffuse="0.3120 0.3120 0.3120" type="directional"/>
+    <light castshadow="false" dir="-0.646997 -0.539164 -0.539164" ambient="0.6769 0.6769 0.6769" diffuse="0.3000 0.3000 0.3000" type="directional"/>
     <body name="table" pos="0.55 0.06 -0.365">
-      <geom name="table" class="solid" size="0.3 0.6 0.03" rgba="0.8 0.8 0.78 1"/>
+      <geom name="table" class="solid" size="0.3 0.6 0.03" rgba="0.7621 0.7274 0.7101 1"/>
     </body>
     <body name="tape" pos="0.49 0 -0.335">
       <geom name="tape" class="decor" size="0.0155 0.013 0.0002" rgba="0.15 0.32 0.7 1"/>
