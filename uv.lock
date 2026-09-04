@@ -601,6 +601,7 @@ gym = [
 dev = [
     { name = "gymnasium" },
     { name = "mypy" },
+    { name = "pillow" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -621,6 +622,7 @@ provides-extras = ["corpus", "gym"]
 dev = [
     { name = "gymnasium", specifier = ">=1.3" },
     { name = "mypy", specifier = ">=1.13" },
+    { name = "pillow", specifier = ">=11" },
     { name = "pre-commit", specifier = ">=3.8" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = "==0.15.0" },
