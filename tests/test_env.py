@@ -241,3 +241,26 @@ def test_a_world_in_a_batch_walks_the_path_it_walks_alone(
     assert np.array_equal(alone.datas[0].qpos, crowd.datas[1].qpos)
     for slot in GRIPPERS:
       assert np.array_equal(obs_a[slot]["image"][0], obs_c[slot]["image"][1])
+
+
+def test_a_world_the_physics_cannot_carry_ends_its_episode() -> None:
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64))
+  _, report = env.reset(seed=0)
+  assert not report["broke"][0]
+  _, reward, terminated, truncated, report = env.step(
+    np.full((1, *env.action_space.shape), 1e6)
+  )
+  assert report["broke"][0]
+  assert terminated[0]
+  assert not truncated[0]
+  assert reward[0] == 0.0
+
+
+def test_a_world_that_holds_where_it_is_never_counts_as_broken() -> None:
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64), worlds=2)
+  observation, _ = env.reset(seeds=[0, 1])
+  for _ in range(10):
+    action = np.stack([hold(flat_row(observation, world=w)) for w in range(2)])
+    observation, _, terminated, _, report = env.step(action)
+    assert not report["broke"].any()
+    assert not terminated.any()
