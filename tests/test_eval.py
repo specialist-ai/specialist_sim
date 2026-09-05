@@ -78,15 +78,29 @@ def test_a_kicked_start_opens_the_episode_at_the_pick() -> None:
 
 def test_an_outcome_names_its_bucket() -> None:
   carried: dict[str, Any] = dict(
-    seed=0, dropped=False, steps=10, held_steps=5, lift=LIFT * 2, tracking=0.0
+    seed=0,
+    dropped=False,
+    steps=10,
+    held_steps=5,
+    lift=LIFT * 2,
+    broke=False,
+    tracking=0.0,
   )
   assert Outcome(success=True, **carried).bucket == "clean"
   assert Outcome(success=False, **carried).bucket == "lost"
   nudged: dict[str, Any] = dict(
-    seed=0, dropped=False, steps=10, held_steps=0, lift=0.0, tracking=0.0
+    seed=0,
+    dropped=False,
+    steps=10,
+    held_steps=0,
+    lift=0.0,
+    broke=False,
+    tracking=0.0,
   )
   assert Outcome(success=True, **nudged).bucket == "slid"
   assert Outcome(success=False, **nudged).bucket == "neither"
+  assert Outcome(success=False, **{**carried, "broke": True}).bucket == "broke"
+  assert Outcome(success=True, **{**carried, "broke": True}).bucket == "broke"
 
 
 def test_a_region_draws_only_inside_its_own_ring() -> None:

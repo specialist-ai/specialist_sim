@@ -89,6 +89,11 @@ class Contract:
   lenses: tuple[str, ...]
 
 
+LEAP = 0.5
+"""The furthest a coordinate travels in a row and is still being carried by
+physics, in metres and radians."""
+
+
 class _Plant:
   """Every world's physics, stepped together through mujoco's thread pool.
 
@@ -123,11 +128,21 @@ class _Plant:
     self.qvel = self._state[:, 1 + model.nq : 1 + model.nq + model.nv]
     """Views of every world's joint coordinates and velocities, current while
     a control step runs."""
+    self.broke = np.zeros(worlds, np.bool_)
+    self._before = np.zeros((worlds, model.nq))
 
   def gather(self) -> None:
     """Take the state the worlds hold, which stepping runs from."""
     for world, data in enumerate(self.datas):
       mujoco.mj_getState(self.model, data, self._state[world], STATE)
+    self.broke[:] = False
+    self._before[:] = self.qpos
+
+  def settle(self) -> None:
+    """Mark the worlds mujoco restarted, which it does silently when it cannot
+    integrate an acceleration, and which shows as a leap across a row."""
+    self.broke |= np.abs(self.qpos - self._before).max(axis=1) > LEAP
+    self._before[:] = self.qpos
 
   def substep(self) -> None:
     """Advance every world one physics step under the written command."""
@@ -347,6 +362,7 @@ class PickPlaceEnv:
         range(-self.cfg.camera_lag, 1, self.rows), seen[index]
       )
     report = self._stacked([judge.info() for judge in self.judges])
+    report["broke"] = np.zeros(self.worlds, np.bool_)
     report["tracking"] = np.zeros(self.worlds)
     return self._observe(), report
 
@@ -421,6 +437,7 @@ class PickPlaceEnv:
       if (substep + 1) % self._per_row:
         continue
       row = (substep + 1) // self._per_row
+      plant.settle()
       self._sample(row - 1)
       if row == self._capture:
         plant.land()
@@ -431,12 +448,14 @@ class PickPlaceEnv:
     self._steps += 1
     judged = [judge.evaluate() for judge in self.judges]
     reward = np.array([one[0] for one in judged], np.float64)
-    terminated = np.array([one[1] for one in judged], np.bool_)
+    broke = plant.broke.copy()
+    terminated = np.array([one[1] for one in judged], np.bool_) | broke
     limit = self.cfg.max_steps
     truncated = (
       (self._steps >= limit) & ~terminated if limit else np.zeros_like(terminated)
     )
     report = self._stacked([one[2] for one in judged])
+    report["broke"] = broke
     report["tracking"] = self._tracking()
     return self._observe(), reward, terminated, truncated, report
 

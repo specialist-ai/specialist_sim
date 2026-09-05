@@ -82,6 +82,7 @@ class Outcome:
   steps: int
   lift: float
   held_steps: int
+  broke: bool
   tracking: float
   """The median over steps of the largest gap between a driven hand and its
   setpoint at the step's end, in metres."""
@@ -100,8 +101,11 @@ class Outcome:
 
   @property
   def bucket(self) -> str:
-    """One of ``clean``, ``slid``, ``lost``, ``neither``: solved by a carry,
-    solved by a nudge, carried but not solved, or nothing at all."""
+    """One of ``broke``, ``clean``, ``slid``, ``lost``, ``neither``: a world
+    the physics could not carry, solved by a carry, solved by a nudge, carried
+    but not solved, or nothing at all."""
+    if self.broke:
+      return "broke"
     if self.success:
       return "clean" if self.picked else "slid"
     return "lost" if self.picked else "neither"
@@ -132,6 +136,7 @@ def sweep(
   steps = np.zeros(env.worlds, np.int64)
   lift = np.zeros(env.worlds)
   held = np.zeros(env.worlds, np.int64)
+  broke = np.zeros(env.worlds, np.bool_)
   tracking: list[list[float]] = [[] for _ in range(env.worlds)]
   outcomes: list[Outcome] = []
   while any(seed is not None for seed in running):
@@ -146,6 +151,7 @@ def sweep(
       steps[world] += 1
       lift[world] = max(lift[world], float(info["cube_pos"][world, 2]) - rest)
       held[world] += bool(info["held"][world])
+      broke[world] |= bool(info["broke"][world])
       tracking[world].append(float(info["tracking"][world]))
       if not (bool(terminated[world]) or steps[world] >= budget):
         continue
@@ -157,6 +163,7 @@ def sweep(
           steps=int(steps[world]),
           lift=float(lift[world]),
           held_steps=int(held[world]),
+          broke=bool(broke[world]),
           tracking=float(np.median(tracking[world])),
         )
       )
@@ -165,7 +172,7 @@ def sweep(
         observation, info = env.reset(seeds=[drawn], worlds=[world])
         agent.reset([world], [drawn])
         running[world] = drawn
-        steps[world], lift[world], held[world] = 0, 0.0, 0
+        steps[world], lift[world], held[world], broke[world] = 0, 0.0, 0, False
         tracking[world] = []
       else:
         running[world] = None
@@ -181,7 +188,7 @@ def summary(
   are known to be comparable before their rates are."""
   task = env.cfg.task
   wins = [outcome for outcome in outcomes if outcome.success]
-  buckets = {name: 0 for name in ("clean", "slid", "lost", "neither")}
+  buckets = {name: 0 for name in ("broke", "clean", "slid", "lost", "neither")}
   for outcome in outcomes:
     buckets[outcome.bucket] += 1
   return {
@@ -198,6 +205,7 @@ def summary(
     "success_rate": len(wins) / len(outcomes),
     "clean_rate": buckets["clean"] / len(outcomes),
     "dropped_rate": sum(outcome.dropped for outcome in outcomes) / len(outcomes),
+    "broke_rate": sum(outcome.broke for outcome in outcomes) / len(outcomes),
     "steps_to_success": (
       float(np.mean([outcome.steps for outcome in wins])) if wins else float("nan")
     ),
