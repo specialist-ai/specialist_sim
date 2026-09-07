@@ -112,6 +112,33 @@ the lens's seat on the gripper base, so a caller holding a real calibration
 renders through it. The cameras are named for the slots the embodiment holds;
 left unset, every hand carries the nominal camera.
 
+## The room behind it
+
+The scene owns what a hand can reach -- the table, the tape, the cube -- and a
+photograph owns everything else. `assets/room_skybox.png` is a 360 shot of the
+capture room, and a ray that strikes no geom reads it instead of coming back
+black. There are no wall geoms: a flat box painted the colour of plaster is a
+worse likeness of that room than a picture of it, and it moved with the scene's
+lights while the picture carries the light it was taken under.
+
+Two consequences worth knowing before trusting a rendered frame:
+
+- **The room has no distance.** A skybox is sampled by direction alone, so every
+  surface in it is infinitely far. That is only fair because the photograph was
+  taken inside the workspace, 0.19 m above the table and within 0.1 m of where a
+  hand rests: over the 0.2 m a camera moves, the far wall shifts by under 8
+  degrees. The near surface that would shift more is the table, and the scene
+  draws that itself.
+- **The photograph is not lit by the scene.** It arrives already exposed, so the
+  lights shade geoms and never the sky. A geom and the wall behind it therefore
+  answer to different exposures, and the two only agree by having been matched
+  once by eye.
+
+`scripts/skybox.py` rebuilds the asset from an equirectangular panorama and
+carries the measurement that turns it into the room frame: both anchor tags are
+in the shot, and the room is defined by them, so their bearings fix the yaw to
+within about three degrees.
+
 ## Starting where you choose
 
 `reset` takes a state and a cube position, for an evaluation that repeats one
@@ -120,3 +147,35 @@ episode exactly; the state names every hand the room holds, eight numbers each:
 ```python
 env.reset(seed=0, options={"state": start, "cube": (0.52, 0.06)})
 ```
+
+## Replaying a recorded take
+
+The `replay` extra adds the corpus reader and drives the environment
+from a solved session, drawing each simulated view over the footage it came
+from. Each take configures the environment with the cameras that recorded it:
+
+```
+uv run --extra corpus python scripts/replay.py \
+  --corpus ~/corpus --session canon002 --output overlay.mp4
+```
+
+## Demonstrating the task in simulation
+
+The `replay` extra also writes episodes as a state layer, in the shape a
+recorded one has, so a trainer reads a demonstration exactly as it reads a
+capture. The cube starts on the tape; one hand kicks it somewhere it was not
+and the other picks it up and puts it back, so a cycle both poses the task and
+solves it. An episode repeats the cycle for eighty to a hundred and twenty
+seconds. Every goal is read off the scene when a stage begins, so the
+demonstration answers to where the cube actually is:
+
+```
+uv run --extra corpus python scripts/synthesise.py \
+  --corpus ~/corpus_sim --episodes 20
+```
+
+Each episode becomes a session under `state_s12_i1/`, holding per hand the
+images at the control rate and the pose, twist and finger opening at 100 Hz.
+An episode that does not finish the task is not written. Where a capture's
+layer records which solve it came from, a demonstration's records the seed that
+reproduces it.

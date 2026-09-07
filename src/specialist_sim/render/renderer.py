@@ -3,7 +3,8 @@
 Every drawn geom is rigid, so each one's triangles live in a hierarchy built
 once in its own frame; a frame's poses carry the rays instead of the geometry,
 and nothing is rebuilt or refit as the scene moves. The cameras share the parts
-and differ only in which they may see.
+and differ only in which they may see. Whatever a ray misses is the room, which
+the scene carries as a skybox photograph rather than as geometry.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import warp as wp
 from specialist_sim.arrays import Int32Array, UInt8Array
 from specialist_sim.calibration import CameraCfg
 from specialist_sim.rays import build_rays
-from specialist_sim.render import kernels
+from specialist_sim.render import kernels, sky
 from specialist_sim.render.scene import gather
 
 __all__ = ["HOUSING", "Renderer", "View", "seat"]
@@ -88,6 +89,10 @@ class Renderer:
     self.part_body = wp.array(
       np.array([part.body for part in self.parts], np.int32), dtype=wp.int32
     )
+    faces = sky.read(model)
+    self.sky_size = int(faces.shape[1])
+    self.sky = wp.array(faces.reshape(-1, 3), dtype=wp.vec3)
+    self.sky_axes = wp.array(sky.AXES, dtype=wp.mat33)
     self.cameras = {
       name: _Camera(
         seat(model, name),
@@ -124,6 +129,9 @@ class Renderer:
           *self._key,
           *self._fill,
           self._ambient,
+          self.sky,
+          self.sky_axes,
+          self.sky_size,
           camera.image,
           camera.body_hit,
         ],

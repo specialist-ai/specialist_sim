@@ -44,7 +44,7 @@ LIFT = 0.010
 LIFTS = (0.006, 0.008, 0.010, 0.012)
 """The lifts a summary also reports clean at, since the score turns on one."""
 
-PROTOCOL = 5
+PROTOCOL = 7
 """The benchmark's revision, bumped by any change that moves an outcome for a
 fixed seed, so a logged score says which protocol it came from.
 
@@ -53,8 +53,12 @@ the cube turned off the tape as on it; a hand the task does not drive is held
 at its commanded setpoint; the bench names each episode's seed to the agent; a
 trajectory is tracked wherever it points; a geom is shaded the colour the
 visualiser resolves for it, whether that comes from a material or from an rgba
-of its own; and the gripper is the described one, held against gravity by
-whatever carries it rather than by a model that cancels its weight.
+of its own; the table is the colour and the lights the balance the recorded
+room reads at, so a wrist frame is exposed the way a capture is; the gripper is
+the described one, held against gravity by
+whatever carries it rather than by a model that cancels its weight; and what a
+ray misses is a photograph of the capture room rather than blackness behind two
+painted walls.
 """
 
 
