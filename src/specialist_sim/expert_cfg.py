@@ -124,9 +124,9 @@ class ExpertCfg:
   """How far an idle hand drifts before it is given somewhere new to be.
 
   No hand in the recordings holds still: the picking hand's executed step is
-  under a millimetre on 0.6% of rows, where a hand told to wait repeats one
+  under a millimeter on 0.6% of rows, where a hand told to wait repeats one
   setpoint exactly and reads 54.8%. More than half of what a policy learned from
-  this dataset was an instruction not to move. A hand between picks is travelling
+  this dataset was an instruction not to move. A hand between picks is traveling
   -- off the tape, round to where the cube will be -- so an idle one here keeps
   moving rather than being frozen at its last command."""
   idle_speed: float = 0.22

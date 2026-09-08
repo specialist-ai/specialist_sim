@@ -117,7 +117,7 @@ left unset, every hand carries the nominal camera.
 The scene owns what a hand can reach -- the table, the tape, the cube -- and a
 photograph owns everything else. `assets/room_skybox.png` is a 360 shot of the
 capture room, and a ray that strikes no geom reads it instead of coming back
-black. There are no wall geoms: a flat box painted the colour of plaster is a
+black. There are no wall geoms: a flat box painted the color of plaster is a
 worse likeness of that room than a picture of it, and it moved with the scene's
 lights while the picture carries the light it was taken under.
 
@@ -170,7 +170,7 @@ seconds. Every goal is read off the scene when a stage begins, so the
 demonstration answers to where the cube actually is:
 
 ```
-uv run --extra dataset python scripts/synthesise.py \
+uv run --extra dataset python scripts/synthesize.py \
   --dataset ~/corpus_sim --episodes 20
 ```
 

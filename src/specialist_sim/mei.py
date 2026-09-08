@@ -32,7 +32,7 @@ class MeiParams:
 
 def rescale(params: MeiParams, scale: float) -> MeiParams:
   """The same lens on an image scaled by ``scale``. Distortion and the mirror
-  act on normalised coordinates."""
+  act on normalized coordinates."""
   return replace(
     params,
     fx=params.fx * scale,

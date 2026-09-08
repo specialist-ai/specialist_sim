@@ -16,12 +16,12 @@ EMPTY = "<mujoco><worldbody><geom type='plane' size='1 1 .1'/></worldbody></mujo
 
 
 def test_each_face_is_read_along_the_way_it_looks() -> None:
-  """Six flat faces, sampled straight down each one's centre."""
+  """Six flat faces, sampled straight down each one's center."""
   faces = np.zeros((len(sky.ORDER), 4, 4, 3), np.float32)
   for index in range(len(sky.ORDER)):
     faces[index] = (index + 1.0) / len(sky.ORDER)
-  centres = [sky.FACES[key][0] for key in sky.ORDER]
-  for index, got in enumerate(read(faces, centres)):
+  centers = [sky.FACES[key][0] for key in sky.ORDER]
+  for index, got in enumerate(read(faces, centers)):
     assert got == pytest.approx([(index + 1.0) / len(sky.ORDER)] * 3, abs=1e-6)
 
 
@@ -29,7 +29,7 @@ def test_a_face_is_read_across_its_columns_and_down_its_rows() -> None:
   """Half way to a face's edge is three quarters of the way across it.
 
   Each ramp reads half a texel short of its corner because the sampler lands
-  between texel centres.
+  between texel centers.
   """
   size = 8
   faces = np.zeros((len(sky.ORDER), size, size, 3), np.float32)
@@ -37,9 +37,9 @@ def test_a_face_is_read_across_its_columns_and_down_its_rows() -> None:
   right = sky.ORDER.index("R")
   faces[right, :, :, 0] = ramp
   faces[right, :, :, 1] = ramp[:, None]
-  centre, across, down = (np.array(axis, np.float64) for axis in sky.FACES["R"])
+  center, across, down = (np.array(axis, np.float64) for axis in sky.FACES["R"])
 
-  column, row = read(faces, [centre + 0.5 * across + 0.25 * down])[0][:2]
+  column, row = read(faces, [center + 0.5 * across + 0.25 * down])[0][:2]
   assert column == pytest.approx(0.75 - 0.5 / size, abs=1e-6)
   assert row == pytest.approx(0.625 - 0.5 / size, abs=1e-6)
 

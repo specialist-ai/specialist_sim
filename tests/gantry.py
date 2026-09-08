@@ -1,7 +1,7 @@
 """A gantry: the gripper on six servoed joints, a carrier that is a joint chain.
 
 Three slides along the room's axes carry three hinges, yaw then pitch then
-roll, and the gripper base sits at the wrist's centre. Every pose in the box
+roll, and the gripper base sits at the wrist's center. Every pose in the box
 has a joint configuration in closed form, so placement and tracking need no
 solver. The chain carries no geometry of its own, so a lens sees exactly what
 it sees on the free rig.

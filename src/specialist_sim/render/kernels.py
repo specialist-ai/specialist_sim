@@ -12,7 +12,7 @@ never the sky.
 import warp as wp
 
 REACH = 50.0
-"""How far a ray is followed, in metres."""
+"""How far a ray is followed, in meters."""
 
 SHADOW_BIAS = 1.0e-3
 """How far a shadow ray starts off its own surface, so a face cannot shade
@@ -74,9 +74,9 @@ def sky(
   """The room photograph along ``ray``, bilinearly.
 
   The face is the axis the ray leans hardest along; ``axes`` carries that face's
-  centre, columns and rows as the columns of a matrix, so the transpose turns a
+  center, columns and rows as the columns of a matrix, so the transpose turns a
   ray into a depth and a texel. Samples clamp at a face's edge rather than
-  crossing into its neighbour, which shows as a seam only under magnification.
+  crossing into its neighbor, which shows as a seam only under magnification.
   """
   lean = wp.vec3(wp.abs(ray[0]), wp.abs(ray[1]), wp.abs(ray[2]))
   face = int(0)

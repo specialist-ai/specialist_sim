@@ -26,7 +26,7 @@ from specialist_sim.action import slerp
 from specialist_sim.arrays import Float64Array
 from specialist_sim.env import PickPlaceEnv
 from specialist_sim.expert_cfg import ExpertCfg
-from specialist_sim.randomise import HOME_ROTATION, home
+from specialist_sim.randomize import HOME_ROTATION, home
 from specialist_sim.spaces import (
   ACTION_HZ,
   FINGER_OPEN,
@@ -198,7 +198,7 @@ class _Drift:
 
   A hand told to wait repeats one setpoint exactly, and the dataset showed what
   that costs: 54.8% of the picking hand's executed steps were under a
-  millimetre, against 0.6% of the recordings'. More than half of what a policy
+  millimeter, against 0.6% of the recordings'. More than half of what a policy
   learned from a scripted demonstration was an instruction not to move, and it
   learned it from a hand that had simply been left where it was while the other
   hand worked. A hand between picks is repositioning, so this one does too.
@@ -317,7 +317,7 @@ class Expert:
     drift.elapsed += self.tracked * self.period
 
   def _drifting(self, hand: int, at: int) -> _Drift:
-    """A short step towards somewhere else on this hand's own side of the tape.
+    """A short step toward somewhere else on this hand's own side of the tape.
 
     It aims at a parked spot, which is already defined to be clear of the other
     hand, and travels only part of the way there, so a drift stays inside the
@@ -326,7 +326,7 @@ class Expert:
 
     Only the picking hand's fingers move. The kicking hand never opens in either
     dataset -- its opening spans 0.0058 rad across the recordings and 0.0001 here
-    -- so drifting it would invent a behaviour neither has.
+    -- so drifting it would invent a behavior neither has.
     """
     assert self._pose is not None
     cfg = self.cfg
@@ -572,7 +572,7 @@ class Expert:
         None,
       )
     # The stage that used to stand over the cube it had just let go now steps
-    # off to a fresh spot, so the picking hand is travelling between picks the
+    # off to a fresh spot, so the picking hand is traveling between picks the
     # way the recorded one is rather than holding its last command.
     return self._parked(stage.hand), self._clearance(), None
 
@@ -597,7 +597,7 @@ class Expert:
     """Where to hold the hand for the cube to come down on the tape.
 
     Across the table the hand moves by the error of the cube it holds, so a cube
-    sitting off-centre between the pads still lands on the tape. How high to
+    sitting off-center between the pads still lands on the tape. How high to
     hold it comes from the grasp instead: the cube rocks as the fingers close on
     it, and a height read off that moment would drive the hand into the table.
     """

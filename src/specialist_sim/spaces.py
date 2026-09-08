@@ -45,7 +45,7 @@ GRIPPERS = ("left_gripper", "right_gripper")
 owns carries its name as a prefix, and so does the image it sees."""
 MASK_RADIUS = 0.5
 """How much of the frame's width the observation keeps, as a radius from its
-centre. The recorded observations are blanked outside the same disc, and the
+center. The recorded observations are blanked outside the same disc, and the
 lens model stays invertible a little past it."""
 
 ACTION_HZ = 50.0

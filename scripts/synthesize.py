@@ -8,7 +8,7 @@ does not run its cycles out and end with the cube on the tape is not written.
 Episodes are generated wherever the GPU is, which may be a copy of the tree
 holding no history, so the revision is passed in from where the history is:
 
-  uv run --extra dataset python scripts/synthesise.py \
+  uv run --extra dataset python scripts/synthesize.py \
     --dataset ~/corpus_sim --episodes 20 --revision $(git rev-parse HEAD)
 """
 

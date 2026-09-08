@@ -9,7 +9,7 @@ import numpy as np
 
 from specialist_sim.arrays import Float32Array, Int32Array
 
-__all__ = ["Part", "colours", "gather"]
+__all__ = ["Part", "colors", "gather"]
 
 DRAWN_GROUPS = (1, 2)
 
@@ -39,16 +39,16 @@ INVISIBLE = 0.05
 """The most alpha a geom may carry and still be left out as invisible."""
 
 DECOR = 1024
-"""Room in the visualiser's scene for the geoms a model does not own."""
+"""Room in the visualizer's scene for the geoms a model does not own."""
 
 
-def colours(model: mujoco.MjModel) -> Float32Array:
-  """Every geom's colour as the visualiser resolves it, ``(ngeom, 4)``.
+def colors(model: mujoco.MjModel) -> Float32Array:
+  """Every geom's color as the visualizer resolves it, ``(ngeom, 4)``.
 
-  A geom is coloured by its material unless it carries an ``rgba`` of its own,
+  A geom is colored by its material unless it carries an ``rgba`` of its own,
   and a compiled model does not record which of the two happened. The
-  visualiser decides it, so the scene it builds is what the tracer shades from
-  and the rule lives in one place. A geom the visualiser leaves out comes back
+  visualizer decides it, so the scene it builds is what the tracer shades from
+  and the rule lives in one place. A geom the visualizer leaves out comes back
   transparent, which is how it is drawn.
   """
   data = mujoco.MjData(model)
@@ -74,7 +74,7 @@ def colours(model: mujoco.MjModel) -> Float32Array:
 
 
 def gather(model: mujoco.MjModel) -> list[Part]:
-  rgba = colours(model)
+  rgba = colors(model)
   parts = []
   for geom in range(model.ngeom):
     if model.geom_group[geom] not in DRAWN_GROUPS:

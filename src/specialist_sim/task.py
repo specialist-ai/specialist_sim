@@ -13,7 +13,7 @@ import mujoco
 import numpy as np
 
 from specialist_sim.arrays import Float64Array
-from specialist_sim.randomise import Kicked, OnTape, Region, Start
+from specialist_sim.randomize import Kicked, OnTape, Region, Start
 from specialist_sim.scene import Scene
 from specialist_sim.spaces import GRIPPERS
 

@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from specialist_sim.arrays import Float64Array
-from specialist_sim.randomise import Region
+from specialist_sim.randomize import Region
 
 __all__ = [
   "CUBE",
@@ -32,7 +32,7 @@ __all__ = [
 ENGAGED = 0.15
 """The opening below which the fingers have closed on the cube: pads meet a
 30 mm cube near +0.02 rad and each other at -0.16, so a crossing here is a
-grasp under way rather than a hand travelling open."""
+grasp under way rather than a hand traveling open."""
 
 STEP = "step"
 """The dataset's step lattice, which orders a session's rows."""

@@ -8,7 +8,7 @@ Two things are read out of the photograph itself to get there.
 
 **Yaw.** Both anchor tags are in the frame, and the room is defined by them: the
 midpoint is the origin and the line between them is across, so their bearings
-fix how the panorama is turned. Reading each tag's centre twice -- by eye off a
+fix how the panorama is turned. Reading each tag's center twice -- by eye off a
 pixel ruler, and as the crossing of the diagonals of its black square in a
 gnomonic reprojection -- gives 48.1 and 50.6 degrees, and :data:`YAW` splits
 them. The same fit puts the photographer at (0.46, 0.00, -0.14) in the room,
@@ -72,9 +72,9 @@ def sample(panorama: Float64Array, ray: Float64Array) -> Float64Array:
 
 def face(panorama: Float64Array, key: str, size: int, yaw: float) -> Float64Array:
   """One face of the cross, ``(size, size, 3)``, in the room frame."""
-  centre, across, down = (np.array(axis, np.float64) for axis in FACES[key])
+  center, across, down = (np.array(axis, np.float64) for axis in FACES[key])
   grid = 2.0 * (np.arange(size) + 0.5) / size - 1.0
-  ray = centre + grid[None, :, None] * across + grid[:, None, None] * down
+  ray = center + grid[None, :, None] * across + grid[:, None, None] * down
   ray /= np.linalg.norm(ray, axis=-1, keepdims=True)
   angle = np.radians(-yaw)
   turned = np.stack(

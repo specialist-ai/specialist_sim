@@ -10,7 +10,7 @@ from specialist_sim import pose as se3
 from specialist_sim.action import hold
 from specialist_sim.embodiment import EmbodimentCfg
 from specialist_sim.observation import flat_row
-from specialist_sim.randomise import HOME_ROTATION, place_cube
+from specialist_sim.randomize import HOME_ROTATION, place_cube
 from specialist_sim.spaces import (
   FINGER_HIGH,
   FINGER_LOW,

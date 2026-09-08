@@ -51,9 +51,9 @@ fixed seed, so a logged score says which protocol it came from.
 Under this one every start is drawn from the episode's own stream by the task,
 the cube turned off the tape as on it; a hand the task does not drive is held
 at its commanded setpoint; the bench names each episode's seed to the agent; a
-trajectory is tracked wherever it points; a geom is shaded the colour the
-visualiser resolves for it, whether that comes from a material or from an rgba
-of its own; the table is the colour and the lights the balance the recorded
+trajectory is tracked wherever it points; a geom is shaded the color the
+visualizer resolves for it, whether that comes from a material or from an rgba
+of its own; the table is the color and the lights the balance the recorded
 room reads at, so a wrist frame is exposed the way a capture is; the gripper is
 the described one, held against gravity by
 whatever carries it rather than by a model that cancels its weight; and what a
@@ -89,7 +89,7 @@ class Outcome:
   broke: bool
   tracking: float
   """The median over steps of the largest gap between a driven hand and its
-  setpoint at the step's end, in metres."""
+  setpoint at the step's end, in meters."""
 
   @property
   def picked(self) -> bool:
@@ -236,7 +236,7 @@ def against(
   The expert drives, so every state the agent answers from is one the dataset
   is full of; the gap is what the agent gets wrong where it was taught, apart
   from anywhere its own choices would have carried it. One gap per driven
-  hand per plan, in metres.
+  hand per plan, in meters.
   """
   from specialist_sim.expert import Expert
 

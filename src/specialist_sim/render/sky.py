@@ -28,7 +28,7 @@ FACES = {
   "F": ((0, -1, 0), (1, 0, 0), (0, 0, -1)),
   "B": ((0, 1, 0), (-1, 0, 0), (0, 0, -1)),
 }
-"""Each face's centre, the way its columns run, and the way its rows run."""
+"""Each face's center, the way its columns run, and the way its rows run."""
 
 ORDER = "RLUDFB"
 """The order a compiled model stores the faces in, whatever the sheet's layout."""

@@ -144,7 +144,7 @@ MATERIALS = """
 
 
 def _albedo(model: mujoco.MjModel) -> dict[str, Any]:
-  """Each named geom's colour, as the tracer will shade it."""
+  """Each named geom's color, as the tracer will shade it."""
   return {
     mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, part.geom): part.albedo
     for part in gather(model)
@@ -158,7 +158,7 @@ def test_a_geom_is_shaded_by_the_material_it_carries() -> None:
   assert shaded["chalked"] == pytest.approx([0.867] * 3, abs=1e-6)
   inked = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "inked")
   assert model.geom_rgba[inked][:3] == pytest.approx([0.5] * 3), (
-    "the compiled model keeps the default here, so the material is the colour"
+    "the compiled model keeps the default here, so the material is the color"
   )
 
 

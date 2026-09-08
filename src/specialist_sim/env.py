@@ -4,7 +4,7 @@ Follows the Gymnasium interface without importing it.
 
 The environment is a stack of sensors on one clock. A row is one tick of the
 step timeline; a control step spans several and returns at the last of them.
-Every value an observation carries is labelled with the row it happened at, and
+Every value an observation carries is labeled with the row it happened at, and
 nothing here reports an age or a delay: a reader subtracts.
 """
 
@@ -21,7 +21,7 @@ import numpy as np
 import specialist_description
 from mujoco import rollout
 
-from specialist_sim import randomise, spaces
+from specialist_sim import randomize, spaces
 from specialist_sim.action import ActionCfg, Ramp
 from specialist_sim.arrays import BoolArray, Float64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
@@ -91,7 +91,7 @@ class Contract:
 
 LEAP = 0.5
 """The furthest a coordinate travels in a row and is still being carried by
-physics, in metres and radians."""
+physics, in meters and radians."""
 
 
 class _Plant:
@@ -410,9 +410,9 @@ class PickPlaceEnv:
     mujoco.mj_resetData(self.scene.model, data)
     self.cfg.task.start.place(self.scene, data, self._draws[world])
     if (state := options.get("state")) is not None:
-      randomise.place_hands(self.scene, data, np.asarray(state, np.float64))
+      randomize.place_hands(self.scene, data, np.asarray(state, np.float64))
     if (cube := options.get("cube")) is not None:
-      randomise.place_cube(self.scene, data, np.asarray(cube, np.float64))
+      randomize.place_cube(self.scene, data, np.asarray(cube, np.float64))
     mujoco.mj_forward(self.scene.model, data)
 
   def step(
@@ -484,7 +484,7 @@ class PickPlaceEnv:
 
   def _tracking(self) -> Float64Array:
     """Each world's largest gap between a driven hand and its setpoint at the
-    step's end, in metres."""
+    step's end, in meters."""
     apart = (
       self._states[:, self._driven, -1, :3] - self.ramp.position[:, -1, self._driven]
     )
