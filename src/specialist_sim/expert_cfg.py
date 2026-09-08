@@ -80,7 +80,7 @@ class ExpertCfg:
   The recorded fingers close to within 0.010 rad of their own hard stop while
   holding the cube; these stop 0.142 rad short of theirs, because the pads meet a
   rigid cube at ``Scene.pinch`` and the servo is only sent as far as
-  ``pinch - bite``. That is the largest single mismatch between the two corpora
+  ``pinch - bite``. That is the largest single mismatch between the two datasets
   in anything a policy reads -- 1.8 pooled standard deviations, against under 0.3
   for every geometric entry -- so this closes further. Not the whole way: past
   touching the servo presses on the cube and stores the force in the contact,
@@ -107,7 +107,7 @@ class ExpertCfg:
   clear: tuple[float, float] = (0.26, 0.40)
   """An opening that clears the cube, drawn afresh each time it is asked for.
 
-  A single number was the second-worst mismatch in the corpus: an empty
+  A single number was the second-worst mismatch in the dataset: an empty
   scripted hand reported one clearance exactly -- 0.40 of finger travel, zero
   spread over 91,575 rows -- where the recorded hand's empty openings run
   continuously from 0.19 to 0.34 of travel about a median of 0.26. A policy
@@ -126,7 +126,7 @@ class ExpertCfg:
   No hand in the recordings holds still: the picking hand's executed step is
   under a millimetre on 0.6% of rows, where a hand told to wait repeats one
   setpoint exactly and reads 54.8%. More than half of what a policy learned from
-  this corpus was an instruction not to move. A hand between picks is travelling
+  this dataset was an instruction not to move. A hand between picks is travelling
   -- off the tape, round to where the cube will be -- so an idle one here keeps
   moving rather than being frozen at its last command."""
   idle_speed: float = 0.22

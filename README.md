@@ -150,13 +150,13 @@ env.reset(seed=0, options={"state": start, "cube": (0.52, 0.06)})
 
 ## Replaying a recorded take
 
-The `replay` extra adds the corpus reader and drives the environment
+The `replay` extra adds the dataset reader and drives the environment
 from a solved session, drawing each simulated view over the footage it came
 from. Each take configures the environment with the cameras that recorded it:
 
 ```
-uv run --extra corpus python scripts/replay.py \
-  --corpus ~/corpus --session canon002 --output overlay.mp4
+uv run --extra dataset python scripts/replay.py \
+  --dataset ~/corpus --session canon002 --output overlay.mp4
 ```
 
 ## Demonstrating the task in simulation
@@ -170,8 +170,8 @@ seconds. Every goal is read off the scene when a stage begins, so the
 demonstration answers to where the cube actually is:
 
 ```
-uv run --extra corpus python scripts/synthesise.py \
-  --corpus ~/corpus_sim --episodes 20
+uv run --extra dataset python scripts/synthesise.py \
+  --dataset ~/corpus_sim --episodes 20
 ```
 
 Each episode becomes a session under `state_s12_i1/`, holding per hand the

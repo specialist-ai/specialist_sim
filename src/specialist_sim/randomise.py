@@ -147,12 +147,12 @@ class Region:
   the hole the ring fills in.
 
   Drawn from uniformly by rejection, so the distribution is the region and
-  nothing else. A corpus's picks are an annulus around the tape — the kick
+  nothing else. A dataset's picks are an annulus around the tape — the kick
   always drives the cube away — and a convex hull of an annulus contains the
-  tape and the disc around it, which the corpus never picks from; ``hole`` is
+  tape and the disc around it, which the dataset never picks from; ``hole`` is
   that disc, as ``(x, y, radius)``, and no draw lands inside it. Both are
-  derived from the corpus a policy was trained on by
-  ``specialist_sim.corpus.region``, at evaluation time, never shipped.
+  derived from the dataset a policy was trained on by
+  ``specialist_sim.dataset.region``, at evaluation time, never shipped.
   """
 
   vertices: tuple[tuple[float, float], ...]

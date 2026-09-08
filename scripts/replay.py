@@ -15,7 +15,7 @@ import imageio_ffmpeg
 import numpy as np
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
-from specialist_sim.corpus.take import Take
+from specialist_sim.dataset.take import Take
 from specialist_sim.observation import flat_row
 from specialist_sim.render.renderer import View
 from specialist_sim.spaces import GRIPPERS
@@ -23,13 +23,13 @@ from specialist_sim.spaces import GRIPPERS
 
 def main() -> None:
   parser = argparse.ArgumentParser()
-  parser.add_argument("--corpus", type=Path, required=True)
+  parser.add_argument("--dataset", type=Path, required=True)
   parser.add_argument("--session", required=True)
   parser.add_argument("--layer", help="which observation configuration to read")
   parser.add_argument("--output", type=Path, required=True)
   args = parser.parse_args()
 
-  take = Take(args.corpus, args.session, args.layer)
+  take = Take(args.dataset, args.session, args.layer)
   size = take.observed(0, 0).shape[0]
   ticks = len(take.times)
   # A 29.97 fps capture puts its keyframes 100.1 ms apart, so the environment

@@ -1,11 +1,11 @@
-"""The patch of table a corpus picks its cubes from, read from the cube's rows.
+"""The patch of table a dataset picks its cubes from, read from the cube's rows.
 
 A grasp stands where the cube stood when the fingers shut on it, so the region
-a policy was shown is the ring around every closing in the corpus it learned
+a policy was shown is the ring around every closing in the dataset it learned
 from, with the hole around the tape those closings keep clear of. Derived at
-evaluation time — corpus in, ``Region`` out — and deterministic: rows are
+evaluation time — dataset in, ``Region`` out — and deterministic: rows are
 ordered by session and step before anything is reduced, so any process
-derives the same region from the same corpus.
+derives the same region from the same dataset.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ ENGAGED = 0.15
 grasp under way rather than a hand travelling open."""
 
 STEP = "step"
-"""The corpus's step lattice, which orders a session's rows."""
+"""The dataset's step lattice, which orders a session's rows."""
 
 CUBE = "/state/cube/pose:Transform3D:translation"
 OPENING = "/state/{hand}/opening:Scalars:scalars"
@@ -50,12 +50,12 @@ def region(
 ) -> Region:
   """The region `dataset`'s picks begin in, read from its catalog.
 
-  The dataset is named, never defaulted: the region belongs to the corpus a
+  The dataset is named, never defaulted: the region belongs to the dataset a
   policy was trained on, and evaluating against any other is a decision. So
   are the two percentiles. `trim` drops the closings farthest from the median
   before the hull, so one stray grasp does not stretch the ring; `nearest` is
   the percentile of the closings' distances from the tape that becomes the
-  hole's radius — the 5th matches the corpus's density, the 1st admits its
+  hole's radius — the 5th matches the dataset's density, the 1st admits its
   rarest picks.
   """
   cube, opening, segment = _rows(catalog_url, dataset)

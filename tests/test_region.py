@@ -1,13 +1,13 @@
-"""The start region a corpus's closings define, from the rows alone."""
+"""The start region a dataset's closings define, from the rows alone."""
 
 import numpy as np
 import pytest
 
-from specialist_sim.corpus.region import closings, derive, opened
+from specialist_sim.dataset.region import closings, derive, opened
 from specialist_sim.randomise import Region
 
 
-def test_the_ring_around_a_corpus_holds_the_closings_it_was_derived_from() -> None:
+def test_the_ring_around_a_dataset_holds_the_closings_it_was_derived_from() -> None:
   """One stray grasp is trimmed before the hull; everything ordinary stays."""
   rng = np.random.default_rng(0)
   sessions, rows = 200, 50
@@ -30,7 +30,7 @@ def test_the_ring_around_a_corpus_holds_the_closings_it_was_derived_from() -> No
   )
 
 
-def test_the_hole_keeps_every_draw_off_the_table_the_corpus_never_picks_from() -> None:
+def test_the_hole_keeps_every_draw_off_the_table_the_dataset_never_picks_from() -> None:
   rng = np.random.default_rng(1)
   sessions, rows, tape = 300, 4, np.array([0.49, 0.0])
   segment = np.repeat(np.arange(sessions), rows)

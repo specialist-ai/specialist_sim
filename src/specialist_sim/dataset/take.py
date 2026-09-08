@@ -60,16 +60,16 @@ class Track:
 class Take:
   """One recorded session, on the clock its observations were written to."""
 
-  def __init__(self, corpus: Path, session: str, layer: str | None = None):
-    estimate = schema.layer_rrd(corpus, schema.ESTIMATE, session)
-    self.base = schema.layer_rrd(corpus, schema.BASE, session)
+  def __init__(self, dataset: Path, session: str, layer: str | None = None):
+    estimate = schema.layer_rrd(dataset, schema.ESTIMATE, session)
+    self.base = schema.layer_rrd(dataset, schema.BASE, session)
     anchors = read_anchors(estimate).poses
     if len(anchors) < 2:
       raise ValueError(f"{session} solved {len(anchors)} anchors, and a room needs two")
     self.room_from_world = se3.inverse(
       _world_from_room(anchors[min(anchors)], anchors[max(anchors)])
     )
-    observed = schema.layer_rrd(corpus, layer or _sole_layer(corpus), session)
+    observed = schema.layer_rrd(dataset, layer or _sole_layer(dataset), session)
     with Recording(observed) as seen:
       self.steps = _steps(seen)
       slots = {hand: _slot(seen, hand) for hand in schema.HANDS}
@@ -231,11 +231,11 @@ def _track(seen: Recording, hand: str, slot: str, tag_from_lens: Float64Array) -
   )
 
 
-def _sole_layer(corpus: Path) -> str:
-  """The one state configuration a corpus holds."""
-  found = sorted(p.name for p in corpus.glob(f"{schema.STATE}_*") if p.is_dir())
+def _sole_layer(dataset: Path) -> str:
+  """The one state configuration a dataset holds."""
+  found = sorted(p.name for p in dataset.glob(f"{schema.STATE}_*") if p.is_dir())
   if len(found) != 1:
-    raise ValueError(f"{corpus} holds {found}, so name the one to read")
+    raise ValueError(f"{dataset} holds {found}, so name the one to read")
   return found[0]
 
 

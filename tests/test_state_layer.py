@@ -6,14 +6,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-pytest.importorskip("specialist_corpus", reason="the corpus extra is not installed")
+pytest.importorskip("specialist_corpus", reason="the dataset extra is not installed")
 
 from specialist_corpus import schema  # noqa: E402
 from specialist_corpus.read import Recording  # noqa: E402
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv  # noqa: E402
 from specialist_sim.action import hold  # noqa: E402
-from specialist_sim.corpus.state import (  # noqa: E402
+from specialist_sim.dataset.state import (  # noqa: E402
   CUBE_POSE,
   IMAGE_STRIDE,
   Episode,
@@ -40,9 +40,9 @@ def test_the_layer_holds_the_cube_at_every_step_the_hands_are_held_at() -> None:
   assert np.allclose(cube[-1], env.scene.data.qpos[at : at + 7])
 
 
-def test_the_cube_pose_is_written_with_the_quaternion_the_corpus_reads() -> None:
-  """MuJoCo holds a quarter turn about the vertical as ``wxyz``; the corpus
-  reads ``xyzw``, and the layer is what the corpus reads."""
+def test_the_cube_pose_is_written_with_the_quaternion_the_dataset_reads() -> None:
+  """MuJoCo holds a quarter turn about the vertical as ``wxyz``; the dataset
+  reads ``xyzw``, and the layer is what the dataset reads."""
   episode = Episode(
     step_times=[0.0],
     cube=[np.array([0.1, 0.2, 0.3, ROOT_HALF, 0.0, 0.0, ROOT_HALF])],
@@ -61,7 +61,7 @@ def test_the_cube_pose_is_written_with_the_quaternion_the_corpus_reads() -> None
 
 def test_a_written_layer_reads_back_as_what_was_recorded(tmp_path: Path) -> None:
   """The one hard constraint: a session must read back exactly as a capture
-  does, hands and cube on the 100 Hz lattice, quaternions in the corpus's
+  does, hands and cube on the 100 Hz lattice, quaternions in the dataset's
   own order."""
   env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
   expert = Expert(env, np.random.default_rng(0), ExpertCfg(length=(0.0, 0.0)))
@@ -78,7 +78,7 @@ def test_a_written_layer_reads_back_as_what_was_recorded(tmp_path: Path) -> None
       kept = np.asarray(episode.poses[hand], np.float64)
       assert np.allclose(xyz, kept[:, :3], atol=1e-6)
       assert np.allclose(quat, kept[:, [4, 5, 6, 3]], atol=1e-6), (
-        "the wxyz the plant holds must land as the xyzw the corpus reads"
+        "the wxyz the plant holds must land as the xyzw the dataset reads"
       )
       rows = np.rint(np.asarray(times) * 100.0)
       assert np.allclose(rows / 100.0, episode.step_times, atol=1e-9), (

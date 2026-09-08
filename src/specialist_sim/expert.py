@@ -196,7 +196,7 @@ class _Grip:
 class _Drift:
   """The small move an idle hand is carried along, so it never freezes.
 
-  A hand told to wait repeats one setpoint exactly, and the corpus showed what
+  A hand told to wait repeats one setpoint exactly, and the dataset showed what
   that costs: 54.8% of the picking hand's executed steps were under a
   millimetre, against 0.6% of the recordings'. More than half of what a policy
   learned from a scripted demonstration was an instruction not to move, and it
@@ -325,7 +325,7 @@ class Expert:
     hand that is working.
 
     Only the picking hand's fingers move. The kicking hand never opens in either
-    corpus -- its opening spans 0.0058 rad across the recordings and 0.0001 here
+    dataset -- its opening spans 0.0058 rad across the recordings and 0.0001 here
     -- so drifting it would invent a behaviour neither has.
     """
     assert self._pose is not None

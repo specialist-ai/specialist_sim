@@ -4,7 +4,7 @@ impedance that chases it on a free rig.
 An action is a trajectory of absolute poses in the room frame,
 ``[position(3), quaternion(4), opening(1)]`` per hand, at ``1 / ACTION_HZ``
 intervals from now. An opening is the coupled finger angle in radians, signed as
-the left finger turns, which is the number a corpus records. A control step
+the left finger turns, which is the number a dataset records. A control step
 tracks the leading poses and drops the rest, so a policy commits to further
 ahead than it executes.
 

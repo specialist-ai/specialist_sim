@@ -8,8 +8,8 @@ does not run its cycles out and end with the cube on the tape is not written.
 Episodes are generated wherever the GPU is, which may be a copy of the tree
 holding no history, so the revision is passed in from where the history is:
 
-  uv run --extra corpus python scripts/synthesise.py \
-    --corpus ~/corpus_sim --episodes 20 --revision $(git rev-parse HEAD)
+  uv run --extra dataset python scripts/synthesise.py \
+    --dataset ~/corpus_sim --episodes 20 --revision $(git rev-parse HEAD)
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import numpy as np
 from specialist_corpus import schema
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
-from specialist_sim.corpus.state import (
+from specialist_sim.dataset.state import (
   IMAGE_STRIDE,
   layer_scale,
   revision,
@@ -36,7 +36,7 @@ from specialist_sim.spaces import GRIPPERS
 
 def main() -> None:
   parser = argparse.ArgumentParser()
-  parser.add_argument("--corpus", type=Path, required=True)
+  parser.add_argument("--dataset", type=Path, required=True)
   parser.add_argument("--episodes", type=int, default=10)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--size", type=int, default=240)
@@ -49,7 +49,7 @@ def main() -> None:
     metavar="FIELD=VALUE",
     help="Override one ExpertCfg field, e.g. --cfg bite=0.02 --cfg kick=0.35,0.10. "
     "Tuple fields take comma-separated values. Repeatable; a demonstration's "
-    "style is what decides whether a corpus matches the recordings, so it is "
+    "style is what decides whether a dataset matches the recordings, so it is "
     "worth sweeping without editing the defaults.",
   )
   args = parser.parse_args()
@@ -98,7 +98,7 @@ def main() -> None:
       seed += 1
       continue
     session = f"sim{seed:04d}"
-    path = schema.layer_rrd(args.corpus, layer, session)
+    path = schema.layer_rrd(args.dataset, layer, session)
     write_layer(path, session, kept, args.size, seed, scale, started_at, sha)
     written += 1
     seed += 1
@@ -106,7 +106,7 @@ def main() -> None:
       f"  {session}: {len(kept.frame_times)} images, {len(kept.step_times)} states, "
       f"{path.stat().st_size / 1e6:.1f} MB"
     )
-  print(f"wrote {written} sessions to {args.corpus / layer}, dropped {refused}")
+  print(f"wrote {written} sessions to {args.dataset / layer}, dropped {refused}")
 
 
 if __name__ == "__main__":

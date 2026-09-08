@@ -6,9 +6,9 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-pytest.importorskip("specialist_corpus", reason="the corpus extra is not installed")
+pytest.importorskip("specialist_corpus", reason="the dataset extra is not installed")
 
-from specialist_sim.corpus.take import Take, Track  # noqa: E402
+from specialist_sim.dataset.take import Take, Track  # noqa: E402
 
 
 class _Standing:

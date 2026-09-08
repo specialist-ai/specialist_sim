@@ -233,7 +233,7 @@ def against(
   """How far the agent's first setpoint sits from the expert's, in the states
   the expert drives to.
 
-  The expert drives, so every state the agent answers from is one the corpus
+  The expert drives, so every state the agent answers from is one the dataset
   is full of; the gap is what the agent gets wrong where it was taught, apart
   from anywhere its own choices would have carried it. One gap per driven
   hand per plan, in metres.

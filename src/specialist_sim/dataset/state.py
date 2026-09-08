@@ -25,7 +25,7 @@ from specialist_corpus import schema
 
 from specialist_sim import PickPlaceEnv
 from specialist_sim.arrays import Float64Array, UInt8Array
-from specialist_sim.corpus.take import SIDE
+from specialist_sim.dataset.take import SIDE
 from specialist_sim.observation import flat_row
 from specialist_sim.spaces import F_STEP, GRIPPERS, MASK_RADIUS
 
