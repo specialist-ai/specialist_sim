@@ -158,17 +158,40 @@ def test_a_camera_that_lags_leaves_the_plant_alone() -> None:
   """A frame taken partway through a step reads the model between physics steps
   and puts back what it read, so the plant runs as though unwatched.
 
-  A lag that is not a whole number of rows is what takes that path: the frame is
-  captured inside the step rather than at the boundary it ends on.
+  A lag that resolves to a frame inside the step is what takes that path, rather
+  than to one on the boundary a step ends on.
   """
   _, plain, _, rows = _delivered(0.0)
-  for lag in (0.03, 0.17, 0.2):
+  for lag in (0.03, 0.07, 0.2):
     _, lagged, taken, _ = _delivered(lag)
     assert np.array_equal(plain, lagged), f"a camera {lag} s behind moved the plant"
     behind = round(lag * PickPlaceCfg().f_row)
     assert any(row % rows for row in taken) == bool(behind % rows), (
       f"a lag of {lag} s did not capture where it was meant to"
     )
+
+
+def test_a_lens_is_read_once_a_step_wherever_the_observation_looks() -> None:
+  """The shutter grid says where a frame may sit; the observation says which one
+  is read, and a step draws that one alone."""
+  for lag in (0.0, 0.03, 0.17):
+    env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6, camera_lag=lag))
+    obs, _ = env.reset(seed=0)
+    drawn = 0
+    taking = env._render
+
+    def counted(worlds: Any = None, taking: Any = taking) -> Any:
+      nonlocal drawn
+      drawn += 1
+      return taking(worlds)
+
+    env._render = counted  # type: ignore[method-assign]
+    action = hold(flat_row(obs))
+    for _ in range(4):
+      obs, *_ = env.step(action)
+    assert drawn == 4, f"a lag of {lag} s drew {drawn} frames over four steps"
+    age = 4 * env.rows - int(obs[GRIPPERS[0]]["image_row"][0])
+    assert env.lag <= age <= env.lag + 4, f"a lag of {lag} s handed a {age}-row frame"
 
 
 def test_a_camera_lag_the_stack_cannot_hold_is_refused() -> None:

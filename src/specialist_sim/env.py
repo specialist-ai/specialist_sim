@@ -2,8 +2,8 @@
 
 Follows the Gymnasium interface without importing it.
 
-The environment is a stack of sensors on one clock. A row is one millisecond;
-a control step spans several and returns at the last of them.
+The environment is a stack of sensors on one clock. A row is one tick of the
+corpus's lattice; a control step spans several and returns at the last of them.
 Every value an observation carries is labelled with the row it happened at, and
 nothing here reports an age or a delay: a reader subtracts.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,8 +58,11 @@ class PickPlaceCfg:
   a deployed loop runs at."""
   action_hz: float = 50.0
   """How often a trajectory names a pose."""
+  camera_hz: float = 30.0
+  """How often each lens fires, on a clock of its own."""
   camera_lag: float = 0.0
-  """How long before the boundary the delivered frame was captured, in seconds."""
+  """How long before the boundary the stack asks for a frame, in seconds. It is
+  handed the newest one the lens had taken by then."""
   max_steps: int | None = None
   """Steps after which a world truncates; ``None`` leaves the ending to the task."""
   image_size: int = 240
@@ -244,11 +247,21 @@ class PickPlaceEnv:
       raise ValueError("a pose must span a whole number of rows")
     self.rows_per_pose = round(spanned)
     """How many rows one pose of a trajectory spans."""
+    frames = self.cfg.camera_hz / self.cfg.control_hz
+    if not np.isclose(frames, round(frames)) or round(frames) < 1:
+      raise ValueError("a control step must span a whole number of camera frames")
+    self._shutters = tuple(
+      round(index * self.rows / round(frames)) for index in range(1, round(frames) + 1)
+    )
+    """The rows within a step a lens fires on. The last is the boundary, so the
+    frame a step returns with was taken at the row it returns at."""
+    if len(set(self._shutters)) != len(self._shutters):
+      raise ValueError("two camera frames of a step fall on one row")
     self.lag = round(self.cfg.camera_lag * self.cfg.f_row)
-    """How many rows behind the boundary the delivered frame was captured."""
-    self._capture = self.rows - self.lag % self.rows
-    """The row within a step the camera's frame is taken on. A whole number of
-    steps of lag lands on the boundary, which is the last row."""
+    """How many rows behind the boundary the stack asks for a frame."""
+    asked = self._shutter(self.rows - self.lag)
+    self._wanted = (asked - 1) % self.rows + 1
+    """The row within a step an observation reads a lens on."""
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
     self._per_row = substeps // self.rows
@@ -370,8 +383,9 @@ class PickPlaceEnv:
     # The rows before an episode are the state it settled into, and so is every
     # frame the first boundaries ask for.
     seen = self._render(chosen)
+    opening = self._fired(self._shutter(-self.lag), 0)
     for index, world in enumerate(chosen):
-      self._frames[world] = dict.fromkeys(range(-self.lag, 1, self.rows), seen[index])
+      self._frames[world] = dict.fromkeys(opening, seen[index])
     report = self._stacked([judge.info() for judge in self.judges])
     report["broke"] = np.zeros(self.worlds, np.bool_)
     report["tracking"] = np.zeros(self.worlds)
@@ -427,13 +441,19 @@ class PickPlaceEnv:
     mujoco.mj_forward(self.scene.model, data)
 
   def step(
-    self, action: Float64Array
+    self,
+    action: Float64Array,
+    watch: Callable[[int, Float64Array, Float64Array], None] | None = None,
   ) -> tuple[dict[str, Any], Float64Array, BoolArray, BoolArray, dict[str, Any]]:
     """Track the leading poses of a trajectory, and report where that leaves things.
 
     Every world is answered for along a leading axis, in reward, in what ended,
     and in everything an observation and its report carry, however many there
     are: a shape does not turn on how the environment was built.
+
+    ``watch`` sees each physics step by its index, with every world's joint
+    coordinates and velocities as that step left them, for a caller recording
+    the plant faster than a control step reports it.
     """
     self.ramp.process(action, self._driven)
     plant = self.plant
@@ -445,15 +465,17 @@ class PickPlaceEnv:
         self.ramp, substep, plant.qpos, plant.qvel, plant.ctrl, plant.xfrc
       )
       plant.substep()
+      if watch is not None:
+        watch(substep, plant.qpos, plant.qvel)
       if (substep + 1) % self._per_row:
         continue
       row = (substep + 1) // self._per_row
       plant.settle()
       self._sample(row - 1)
-      if row == self._capture:
+      if row == self._wanted:
         plant.land()
-        self._keep(self._capture)
-    if self._capture != self.rows:
+        self._keep(row)
+    if self._wanted != self.rows:
       plant.land()
     self._at += self.rows
     self._steps += 1
@@ -477,9 +499,21 @@ class PickPlaceEnv:
     for world in range(self.worlds):
       kept = int(self._at[world]) + offset
       self._frames[world][kept] = seen[world]
-      floor = kept - self.lag
+      floor = kept - self.lag - self.rows
       for older in [row for row in self._frames[world] if row < floor]:
         del self._frames[world][older]
+
+  def _shutter(self, row: int) -> int:
+    """The row the newest frame taken at or before ``row`` sits on."""
+    step, inside = divmod(row - 1, self.rows)
+    taken = [offset for offset in self._shutters if offset <= inside + 1]
+    return step * self.rows + (taken[-1] if taken else self._shutters[-1] - self.rows)
+
+  def _fired(self, first: int, last: int) -> list[int]:
+    """Every row a lens fires on from ``first`` to ``last``, inclusive."""
+    steps = range(first // self.rows - 1, last // self.rows + 2)
+    fired = (step * self.rows + offset for step in steps for offset in self._shutters)
+    return [row for row in fired if first <= row <= last]
 
   def _sample(self, row: int) -> None:
     """Keep every world's hands at one row."""
@@ -515,7 +549,7 @@ class PickPlaceEnv:
 
   def _observe(self) -> dict[str, Any]:
     """The rows this step spanned, and the frame that has caught up with it."""
-    taken = self._at - self.lag
+    taken = np.array([self._shutter(int(at) - self.lag) for at in self._at], np.int64)
     frames = [self._frames[world][int(when)] for world, when in enumerate(taken)]
     out: dict[str, Any] = {
       "row": np.stack(

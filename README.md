@@ -40,6 +40,13 @@ so a residual policy is a subtraction. The reward is one on the step the cube
 settles onto the tape unheld, so an undiscounted return is the success
 indicator.
 
+A lens fires at `camera_hz`, 30 Hz by default, on a clock of its own: a control
+step spans a whole number of its frames and its last one lands on the boundary.
+An observation is handed the newest frame the lens had taken `camera_lag`
+seconds back, and `image_row` says which row that frame sits on. A step draws that one
+frame and no other, so the grid decides how old a frame is without deciding how
+much is rendered.
+
 A lens keeps the middle `MASK_RADIUS` of its width and is black outside it,
 which is the disc a recorded image keeps. The projection stays invertible
 a little past that, so the mask, not the lens model, is what bounds the image.
