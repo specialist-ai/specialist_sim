@@ -17,7 +17,7 @@ __all__ = ["SceneCfg", "Scene", "Cube"]
 
 @dataclass(frozen=True)
 class SceneCfg:
-  physics_dt: float = 1.0 / 2000.0
+  physics_dt: float = 1.0 / 3000.0
 
 
 @dataclass(frozen=True)

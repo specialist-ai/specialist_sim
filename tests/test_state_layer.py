@@ -24,7 +24,7 @@ from specialist_sim.dataset.state import (  # noqa: E402
 )
 from specialist_sim.expert import Expert, ExpertCfg  # noqa: E402
 from specialist_sim.observation import flat_row  # noqa: E402
-from specialist_sim.spaces import GRIPPERS  # noqa: E402
+from specialist_sim.spaces import F_STEP, GRIPPERS  # noqa: E402
 
 ROOT_HALF = np.sqrt(0.5)
 """A quarter turn about the vertical, as either convention spells its halves."""
@@ -61,7 +61,7 @@ def test_the_cube_pose_is_written_with_the_quaternion_the_dataset_reads() -> Non
 
 def test_a_written_layer_reads_back_as_what_was_recorded(tmp_path: Path) -> None:
   """The one hard constraint: a session must read back exactly as a capture
-  does, hands and cube on the 100 Hz lattice, quaternions in the dataset's
+  does, hands and cube on the step lattice, quaternions in the dataset's
   own order."""
   env = PickPlaceEnv(PickPlaceCfg(image_size=64, max_steps=10**6))
   expert = Expert(env, np.random.default_rng(0), ExpertCfg(length=(0.0, 0.0)))
@@ -80,9 +80,9 @@ def test_a_written_layer_reads_back_as_what_was_recorded(tmp_path: Path) -> None
       assert np.allclose(quat, kept[:, [4, 5, 6, 3]], atol=1e-6), (
         "the wxyz the plant holds must land as the xyzw the dataset reads"
       )
-      rows = np.rint(np.asarray(times) * 100.0)
-      assert np.allclose(rows / 100.0, episode.step_times, atol=1e-9), (
-        "state times must sit exactly on the 100 Hz lattice"
+      rows = np.rint(np.asarray(times) * F_STEP)
+      assert np.allclose(rows / F_STEP, episode.step_times, atol=1e-9), (
+        f"state times must sit exactly on the {F_STEP:.0f} Hz lattice"
       )
       opening = seen.values(schema.state_opening(hand), schema.SCALARS, 1)[1][:, 0]
       assert np.allclose(opening, episode.openings[hand], atol=1e-6)

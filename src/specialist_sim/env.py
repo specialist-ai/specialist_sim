@@ -23,7 +23,7 @@ from mujoco import rollout
 
 from specialist_sim import randomize, spaces
 from specialist_sim.action import ActionCfg, Ramp
-from specialist_sim.arrays import BoolArray, Float64Array
+from specialist_sim.arrays import BoolArray, Float64Array, Int64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
 from specialist_sim.control import XFRC, ControllerCfg
 from specialist_sim.embodiment import (
@@ -41,8 +41,12 @@ from specialist_sim.task import BIMANUAL, Judge, Task
 __all__ = ["Contract", "PickPlaceCfg", "PickPlaceEnv"]
 
 
-MAX_LAG = 20
-"""How many rows a camera may run behind the rest of the stack."""
+MAX_LAG = 30
+"""How many rows a camera may run behind the rest of the stack.
+
+Thirty rows is 200 ms on the ``F_STEP`` lattice, which is the far end of the
+camera delay a policy is trained across.
+"""
 
 STATE = mujoco.mjtState.mjSTATE_FULLPHYSICS
 """What carries from one substep to the next. A rollout names no other state, so
@@ -55,6 +59,14 @@ class PickPlaceCfg:
   control_hz: float = 10.0
   camera_lag: int = 0
   """How many rows behind the boundary the delivered frame was captured."""
+  capture_hz: float = 10.0
+  """How often a lens is rendered, in Hz.
+
+  The rows between captures must divide the control step, so the frames of one
+  step are evenly spaced and the last of them lands on the boundary. One capture
+  per control step is enough to hand a policy a frame; a recording wants the
+  camera's own rate, because the dataset stores one row per frame.
+  """
   max_steps: int | None = None
   """Steps after which a world truncates; ``None`` leaves the ending to the task."""
   image_size: int = 240
@@ -234,9 +246,24 @@ class PickPlaceEnv:
       raise ValueError("a control step must span a whole number of rows")
     self.rows = round(rows)
     """How many rows of the step timeline one control step spans."""
-    self._capture = self.rows - self.cfg.camera_lag % self.rows
-    """The row within a step the camera's frame is taken on. A whole number of
-    steps of lag lands on the boundary, which is the last row."""
+    per_capture = F_STEP / self.cfg.capture_hz
+    if not np.isclose(per_capture, round(per_capture)):
+      raise ValueError("a capture must land on a whole row of the step timeline")
+    self._per_capture = round(per_capture)
+    if self.rows % self._per_capture:
+      raise ValueError("a control step must span a whole number of captures")
+    self._captures = tuple(
+      row
+      for row in range(1, self.rows + 1)
+      if (row + self.cfg.camera_lag) % self._per_capture == 0
+    )
+    """The rows within a step a lens is rendered on.
+
+    The grid is phased on the lag, so the row an observation delivers --
+    ``camera_lag`` rows behind the boundary -- is always one that was rendered.
+    A lag that is a whole number of captures puts the last capture on the
+    boundary; any other lag moves the whole grid back with it.
+    """
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
     self._per_row = substeps // self.rows
@@ -419,6 +446,7 @@ class PickPlaceEnv:
     self,
     action: Float64Array,
     watch: Callable[[int, Float64Array, Float64Array], None] | None = None,
+    capture: Callable[[Int64Array, list[dict[str, Any]]], None] | None = None,
   ) -> tuple[dict[str, Any], Float64Array, BoolArray, BoolArray, dict[str, Any]]:
     """Track the leading poses of a trajectory, and report where that leaves things.
 
@@ -428,7 +456,10 @@ class PickPlaceEnv:
 
     ``watch`` sees each physics step by its index, with every world's joint
     coordinates and velocities as that step left them, for a caller recording
-    the plant faster than a control step reports it.
+    the plant faster than a control step reports it. ``capture`` sees each
+    rendered row by its absolute row per world, with what every world's lenses
+    saw there, for a caller recording frames faster than the one an observation
+    carries.
     """
     self.ramp.process(action, self._driven)
     plant = self.plant
@@ -447,10 +478,14 @@ class PickPlaceEnv:
       row = (substep + 1) // self._per_row
       plant.settle()
       self._sample(row - 1)
-      if row == self._capture:
+      if row in self._captures:
+        # The renderer reads the worlds' own data, so the stepped state has to be
+        # put back on them before a lens can see it.
         plant.land()
-        self._keep(self._capture)
-    if self._capture != self.rows:
+        seen = self._keep(row)
+        if capture is not None:
+          capture(self._at + row, seen)
+    if self._captures[-1] != self.rows:
       plant.land()
     self._at += self.rows
     self._steps += 1
@@ -467,7 +502,7 @@ class PickPlaceEnv:
     report["tracking"] = self._tracking()
     return self._observe(), reward, terminated, truncated, report
 
-  def _keep(self, offset: int) -> None:
+  def _keep(self, offset: int) -> list[dict[str, Any]]:
     """Hold what every world's lenses see, on the row each of them is taking,
     and let go of every row no future observation can ask for."""
     seen = self._render()
@@ -477,6 +512,7 @@ class PickPlaceEnv:
       floor = kept - self.cfg.camera_lag
       for older in [row for row in self._frames[world] if row < floor]:
         del self._frames[world][older]
+    return seen
 
   def _sample(self, row: int) -> None:
     """Keep every world's hands at one row of the step timeline."""
