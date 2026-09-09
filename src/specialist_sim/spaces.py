@@ -50,9 +50,13 @@ lens model stays invertible a little past it."""
 
 ACTION_HZ = 50.0
 """How often a trajectory names a pose."""
-F_STEP = 100.0
+F_STEP = 150.0
 """How often the step timeline ticks. A row is one of its ticks, and it is the
-rate a dataset records a hand at."""
+rate a dataset records a hand at.
+
+It divides both ``ACTION_HZ`` and the 30 Hz camera, which is what lets a control
+step span a whole number of poses and a frame land on a row.
+"""
 
 FINGER_LOW = -0.261799
 FINGER_HIGH = 0.698132
