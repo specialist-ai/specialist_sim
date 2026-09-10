@@ -1,6 +1,7 @@
 """The rule-based demonstration: does it finish the task, and does it answer to
 the scene rather than to a clock."""
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -8,6 +9,7 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.expert import _PEAK, _STAGES, PICKING, Expert, ExpertCfg, _Move
+from specialist_sim.expert_cfg import PARKED, ROVING
 from specialist_sim.observation import flat_row
 from specialist_sim.spaces import HORIZON, PER_HAND
 
@@ -151,3 +153,59 @@ def test_a_finished_demonstration_still_names_an_angle() -> None:
   assert before is not None, "the demonstration finished before it began"
   fingers = slice(PER_HAND - 1, None, PER_HAND)
   assert np.allclose(action[:, fingers], before[expert.tracked - 1, fingers])
+
+
+def _held(cfg: ExpertCfg, seed: int, steps: int = 150) -> float:
+  """The share of commanded steps on which the kicking hand does not move.
+
+  It is the hand that is idle for most of a cycle, so it is where the two
+  tunings part: one leaves it where the strike put it, the other keeps it
+  traveling.
+  """
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64))
+  observation, info = env.reset(seed=seed)
+  expert = Expert(env, np.random.default_rng(seed), replace(cfg, length=(0.0, 0.0)))
+  still, seen, last = 0, 0, None
+  for _ in range(steps):
+    action = expert.act(flat_row(observation), info["cube_pos"][0])
+    at = action[expert.tracked - 1, :3]
+    if last is not None:
+      seen += 1
+      still += float(np.linalg.norm(at - last)) < 1e-6
+    last = at.copy()
+    observation, _, _, _, info = env.step(action)
+    if expert.done:
+      break
+  return still / seen
+
+
+@pytest.mark.parametrize("seed", [6, 7, 8])
+def test_a_parked_hand_stands_still_where_a_roving_one_never_does(seed: int) -> None:
+  """The two tunings differ in what a hand does when no stage is driving it,
+  and that difference is most of what a policy reads off the dataset: a hand
+  told to wait repeats one setpoint exactly, which teaches an instruction not
+  to move. Parked holds it over half the time, which is what the first dataset
+  measured; roving all but never does.
+  """
+  assert PARKED.loiter is None and ROVING.loiter is not None
+  assert _held(ROVING, seed) < 0.05, "a roving hand came to a stop"
+  assert _held(PARKED, seed) > 0.40, "a parked hand kept moving"
+
+
+@pytest.mark.parametrize("tuning", [ROVING, PARKED])
+def test_either_tuning_puts_the_cube_on_the_tape(tuning: ExpertCfg) -> None:
+  """A tuning that cannot finish the task is not an option, whatever else it
+  gets right about how a hand moves."""
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64))
+  observation, info = env.reset(seed=1)
+  expert = Expert(env, np.random.default_rng(1), replace(tuning, length=(0.0, 0.0)))
+  for _ in range(600):
+    action = expert.act(flat_row(observation), info["cube_pos"][0])
+    observation, _, _, _, info = env.step(action)
+    if expert.done:
+      break
+  assert expert.done, f"the demonstration stalled at stage {expert.stage}"
+  assert info["is_success"][0], (
+    f"the cube ended {np.hypot(*(info['cube_pos'][0][:2] - env.scene.tape)) * 1000:.1f} mm "
+    "from the tape"
+  )

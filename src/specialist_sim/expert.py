@@ -285,10 +285,11 @@ class Expert:
       if self._length > 0.0 and self._clock >= self._length + self.cfg.rescue:
         self.done = True
         self._move = None
-    # Every hand the stage does not drive keeps moving. The stage's own hand
-    # forgets where it was drifting, so the plan it is about to be given starts
-    # from where the drift left it rather than from a stale goal.
-    if not self.done:
+    # Every hand the stage does not drive keeps moving, unless the tuning asks
+    # for a hand that holds still. The stage's own hand forgets where it was
+    # drifting, so the plan it is about to be given starts from where the drift
+    # left it rather than from a stale goal.
+    if self.cfg.loiter is not None and not self.done:
       driven = _STAGES[self.stage].hand if self._move is not None else None
       for hand in range(len(GRIPPERS)):
         if hand == driven:
@@ -336,6 +337,7 @@ class Expert:
     """
     assert self._pose is not None
     cfg = self.cfg
+    assert cfg.loiter is not None
     start = np.asarray(self._pose[at : at + 3], np.float64).copy()
     held = float(self._pose[at + PER_HAND - 1])
     toward = self._parked(hand) - start

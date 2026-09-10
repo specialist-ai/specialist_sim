@@ -24,13 +24,13 @@ from specialist_corpus import schema
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.corpus.state import (
-  IMAGE_STRIDE,
   layer_scale,
   revision,
   rollout,
   write_layer,
 )
-from specialist_sim.expert import Expert, ExpertCfg
+from specialist_sim.expert import Expert
+from specialist_sim.expert_cfg import EXPERTS, ROVING
 from specialist_sim.spaces import GRIPPERS
 
 
@@ -43,6 +43,14 @@ def main() -> None:
   parser.add_argument("--max-steps", type=int, default=2000)
   parser.add_argument("--revision", type=str, default=None)
   parser.add_argument(
+    "--expert",
+    choices=sorted(EXPERTS),
+    default="roving",
+    help="Which named tuning to demonstrate with. They differ in how a hand "
+    "moves and in what it does between picks, so two datasets drawn with "
+    "different ones are different datasets.",
+  )
+  parser.add_argument(
     "--cfg",
     action="append",
     default=[],
@@ -54,22 +62,25 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  cfg = ExpertCfg()
+  cfg = EXPERTS[args.expert]
   for setting in args.cfg:
     field, _, written = setting.partition("=")
     if not hasattr(cfg, field):
       raise SystemExit(f"ExpertCfg has no field {field!r}")
-    current = getattr(cfg, field)
+    # A field a tuning leaves unset says nothing about its shape, so the shape
+    # comes from the one tuning that sets every field.
+    shape = getattr(ROVING, field)
     parsed: object
-    if isinstance(current, tuple):
+    if written == "none":
+      parsed = None
+    elif isinstance(shape, tuple):
       parsed = tuple(float(part) for part in written.split(","))
-      if len(parsed) != len(current):
-        raise SystemExit(f"{field} takes {len(current)} values, not {len(parsed)}")
+      if len(parsed) != len(shape):
+        raise SystemExit(f"{field} takes {len(shape)} values, not {len(parsed)}")
     else:
       parsed = float(written)
     cfg = replace(cfg, **{field: parsed})
-  if args.cfg:
-    print("expert overrides: " + "  ".join(args.cfg))
+  print(f"expert: {args.expert}" + "".join(f"  {one}" for one in args.cfg))
 
   sha = args.revision or revision()
   env = PickPlaceEnv(PickPlaceCfg(image_size=args.size, max_steps=10**6))
@@ -99,7 +110,9 @@ def main() -> None:
       continue
     session = f"sim{seed:04d}"
     path = schema.layer_rrd(args.dataset, layer, session)
-    write_layer(path, session, kept, args.size, seed, scale, started_at, sha)
+    write_layer(
+      path, session, kept, args.size, seed, scale, started_at, sha, args.expert
+    )
     written += 1
     seed += 1
     print(

@@ -1,9 +1,17 @@
 """What a demonstration is like, apart from the machinery that performs it.
 
-Every number here is a style choice measured off the human recordings in
-corpus_0821 or sized to this scene; the driver in ``expert`` consumes it, and
-nothing here imports the driver, so a sweep or a training config can read and
-build one without standing an environment up.
+Every number here is a style choice measured off the human recordings or sized
+to this scene; the driver in ``expert`` consumes it, and nothing here imports
+the driver, so a sweep or a training config can read and build one without
+standing an environment up.
+
+Two tunings are named. ``ROVING`` is the default and what the datasets so far
+were drawn with: set against corpus_0821 and then against 91,575 rows of its
+own output, its hand keeps moving between picks and its episodes quicken as
+they run. ``PARKED`` is the tuning that grew on ``main``, set against
+corpus_0903: its hand stands still between picks, its cycles lengthen rather
+than shorten, and its fingers are the slower, gentler pair. They differ only in
+the values below, so a caller names one and reads the same fields either way.
 """
 
 from __future__ import annotations
@@ -12,7 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["ExpertCfg"]
+__all__ = ["EXPERTS", "PARKED", "ROVING", "ExpertCfg"]
 
 
 @dataclass(frozen=True)
@@ -59,7 +67,9 @@ class ExpertCfg:
   lower than its top. A goal past it would buy a stage the time its distance
   asks for and leave the hand nowhere the cube is."""
   hurry: float = 0.10
-  """How much an episode quickens between its first cycle and its last."""
+  """How much an episode quickens between its first cycle and its last.
+
+  Negative for a hand that wearies instead, whose cycles stretch as it runs."""
   flow: float = 0.10
   """How fast a hand is still going as one stage hands over to the next, as a
   share of its top speed. A hand that takes the cube and lets it go on the move
@@ -120,8 +130,9 @@ class ExpertCfg:
   length: tuple[float, float] = (80.0, 95.0)
   """How long an episode runs before it stops starting cycles. It then sees the
   one it is in through, so a recording outlasts this by up to a cycle."""
-  loiter: tuple[float, float] = (0.05, 0.14)
-  """How far an idle hand drifts before it is given somewhere new to be.
+  loiter: tuple[float, float] | None = (0.05, 0.14)
+  """How far an idle hand drifts before it is given somewhere new to be, or
+  ``None`` for a hand that holds the last pose it was commanded.
 
   No hand in the recordings holds still: the picking hand's executed step is
   under a millimeter on 0.6% of rows, where a hand told to wait repeats one
@@ -150,3 +161,44 @@ class ExpertCfg:
   rescue: float = 12.0
   """How long past its length an episode keeps cycling to end with the cube on
   the tape, after which it stops wherever the cube lies."""
+
+
+ROVING = ExpertCfg()
+"""A hand that never comes to rest, which is what the recordings show.
+
+An idle hand drifts rather than freezing, a clearance is drawn from a range
+rather than being one number, and an episode quickens as it runs.
+"""
+
+PARKED = ExpertCfg(
+  across=(0.15, 2.1),
+  speed=0.70,
+  kick=(0.50, 0.10),
+  wrist=np.radians(10.0),
+  squaring=1.05,
+  patch=(0.035, 0.020),
+  hurry=-0.10,
+  flow=0.045,
+  finger_rate=2.5,
+  let_go=0.6,
+  freed=0.035,
+  arch=0.06,
+  clear=(0.40, 0.40),
+  linger=0.1,
+  pace=(1.0, 1.35),
+  loiter=None,
+)
+"""A hand that stands still between picks.
+
+It reaches further per unit of time and turns through the whole of a move that
+ends at the cube, so the pads arrive square to a fraction of a degree; it slows
+rather than quickens over an episode; and its fingers are the slower pair.
+``clear`` collapses to the single 0.40 opening it was measured with, and
+``loiter`` is unset, so a hand no stage is driving holds its last command.
+
+``reach`` is not among the overrides: its floor is the tabletop, which the room
+decides and not the demonstration.
+"""
+
+EXPERTS = {"roving": ROVING, "parked": PARKED}
+"""The named tunings, for a caller that takes one as a string."""

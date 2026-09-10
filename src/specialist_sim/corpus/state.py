@@ -319,6 +319,7 @@ def write_layer(
   scale: int,
   started_at: int,
   sha: str,
+  expert: str,
 ) -> None:
   """Write one episode under its session id, in the layer's own shape."""
   chunks = [
@@ -347,8 +348,10 @@ def write_layer(
     "urdf_sha": model_sha(),
     "rerun_version": rr.__version__,
     # A capture names the solve it came from; a demonstration names the draw
-    # that produced it, which is what reproduces the episode.
+    # that produced it and the tuning it was drawn with, which together are
+    # what reproduces the episode.
     "seed": seed,
+    "expert": expert,
   }
   path.parent.mkdir(parents=True, exist_ok=True)
   partial = path.parent / (path.name + ".partial")

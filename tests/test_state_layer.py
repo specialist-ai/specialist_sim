@@ -15,7 +15,6 @@ from specialist_sim import PickPlaceCfg, PickPlaceEnv  # noqa: E402
 from specialist_sim.action import hold  # noqa: E402
 from specialist_sim.corpus.state import (  # noqa: E402
   CUBE_POSE,
-  IMAGE_STRIDE,
   Episode,
   cube_chunk,
   layer_scale,
@@ -69,7 +68,7 @@ def test_a_written_layer_reads_back_as_what_was_recorded(tmp_path: Path) -> None
   scale = layer_scale(env.cameras[GRIPPERS[0]].width, 64)
   layer = schema.state_layer(scale, env.cfg.f_row)
   path = schema.layer_rrd(tmp_path, layer, "sim0000")
-  write_layer(path, "sim0000", episode, 64, 0, scale, 0, "test-sha")
+  write_layer(path, "sim0000", episode, 64, 0, scale, 0, "test-sha", "roving")
 
   with Recording(path) as seen:
     for hand in schema.HANDS:
