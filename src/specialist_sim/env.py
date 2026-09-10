@@ -2,8 +2,8 @@
 
 Follows the Gymnasium interface without importing it.
 
-The environment is a stack of sensors on one clock. A row is one tick of the
-step timeline; a control step spans several and returns at the last of them.
+The environment is a stack of sensors on one clock. A row is one millisecond;
+a control step spans several and returns at the last of them.
 Every value an observation carries is labelled with the row it happened at, and
 nothing here reports an age or a delay: a reader subtracts.
 """
@@ -35,14 +35,14 @@ from specialist_sim.embodiment import (
 )
 from specialist_sim.render import Renderer, seat
 from specialist_sim.scene import Scene, SceneCfg
-from specialist_sim.spaces import F_STEP, HORIZON, PER_HAND
+from specialist_sim.spaces import HORIZON, PER_HAND
 from specialist_sim.task import BIMANUAL, Judge, Task
 
 __all__ = ["Contract", "PickPlaceCfg", "PickPlaceEnv"]
 
 
-MAX_LAG = 20
-"""How many rows a camera may run behind the rest of the stack."""
+MAX_LAG = 0.2
+"""How long a camera may run behind the rest of the stack, in seconds."""
 
 STATE = mujoco.mjtState.mjSTATE_FULLPHYSICS
 """What carries from one substep to the next. A rollout names no other state, so
@@ -53,8 +53,13 @@ substeps drifts from an unbroken one."""
 @dataclass(frozen=True)
 class PickPlaceCfg:
   control_hz: float = 10.0
-  camera_lag: int = 0
-  """How many rows behind the boundary the delivered frame was captured."""
+  f_row: float = 100.0
+  """How often the row timeline ticks: the rate a corpus records a hand at and
+  a deployed loop runs at."""
+  action_hz: float = 50.0
+  """How often a trajectory names a pose."""
+  camera_lag: float = 0.0
+  """How long before the boundary the delivered frame was captured, in seconds."""
   max_steps: int | None = None
   """Steps after which a world truncates; ``None`` leaves the ending to the task."""
   image_size: int = 240
@@ -79,7 +84,7 @@ class PickPlaceCfg:
 class Contract:
   """The environment's side of the seam a policy is checked against."""
 
-  step_hz: float
+  row_hz: float
   action_hz: float
   control_hz: float
   horizon: int
@@ -181,9 +186,9 @@ class PickPlaceEnv:
     modes = PickPlaceEnv.metadata["render_modes"]
     if render_mode is not None and render_mode not in modes:
       raise ValueError(f"{render_mode} is not one of {modes}")
-    if not 0 <= self.cfg.camera_lag <= MAX_LAG:
+    if not 0.0 <= self.cfg.camera_lag <= MAX_LAG:
       raise ValueError(
-        f"a camera runs 0 to {MAX_LAG} rows behind, not {self.cfg.camera_lag}"
+        f"a camera runs 0 to {MAX_LAG} s behind, not {self.cfg.camera_lag}"
       )
     self.scene = Scene(self.cfg.scene, self.cfg.embodiment.build())
     slots = self.scene.slots
@@ -229,12 +234,19 @@ class PickPlaceEnv:
     substeps = round(control_dt / self.cfg.scene.physics_dt)
     if not np.isclose(substeps * self.cfg.scene.physics_dt, control_dt):
       raise ValueError("the control step must be a whole number of physics steps")
-    rows = F_STEP / self.cfg.control_hz
+    rows = self.cfg.f_row / self.cfg.control_hz
     if not np.isclose(rows, round(rows)):
       raise ValueError("a control step must span a whole number of rows")
     self.rows = round(rows)
-    """How many rows of the step timeline one control step spans."""
-    self._capture = self.rows - self.cfg.camera_lag % self.rows
+    """How many rows one control step spans."""
+    spanned = self.cfg.f_row / self.cfg.action_hz
+    if not np.isclose(spanned, round(spanned)):
+      raise ValueError("a pose must span a whole number of rows")
+    self.rows_per_pose = round(spanned)
+    """How many rows one pose of a trajectory spans."""
+    self.lag = round(self.cfg.camera_lag * self.cfg.f_row)
+    """How many rows behind the boundary the delivered frame was captured."""
+    self._capture = self.rows - self.lag % self.rows
     """The row within a step the camera's frame is taken on. A whole number of
     steps of lag lands on the boundary, which is the last row."""
     if substeps % self.rows:
@@ -248,6 +260,7 @@ class PickPlaceEnv:
       action.max_speed,
       action.max_turn,
       self.worlds,
+      self.cfg.action_hz,
     )
     """The commanded trajectory, resampled onto this step's substeps."""
     settings = self.cfg.controller or self.scene.embodiment.default_controller(action)
@@ -262,7 +275,7 @@ class PickPlaceEnv:
     self._steps = np.zeros(self.worlds, np.int64)
     """How many control steps each world has run since it was last reset."""
     self._at = np.zeros(self.worlds, np.int64)
-    """The row of the step timeline each world stands on."""
+    """The row each world stands on."""
     hands = len(self.scene.hands)
     self._states = np.zeros((self.worlds, hands, self.rows, PER_HAND), np.float32)
     """Every world's hands at each row of the step, laid out like a state."""
@@ -285,8 +298,8 @@ class PickPlaceEnv:
     """What a policy must agree with this environment on."""
     lens = self.cameras[self.lenses[0]]
     return Contract(
-      step_hz=F_STEP,
-      action_hz=spaces.ACTION_HZ,
+      row_hz=self.cfg.f_row,
+      action_hz=self.cfg.action_hz,
       control_hz=self.cfg.control_hz,
       horizon=HORIZON,
       image_size=self.cfg.image_size,
@@ -358,9 +371,7 @@ class PickPlaceEnv:
     # frame the first boundaries ask for.
     seen = self._render(chosen)
     for index, world in enumerate(chosen):
-      self._frames[world] = dict.fromkeys(
-        range(-self.cfg.camera_lag, 1, self.rows), seen[index]
-      )
+      self._frames[world] = dict.fromkeys(range(-self.lag, 1, self.rows), seen[index])
     report = self._stacked([judge.info() for judge in self.judges])
     report["broke"] = np.zeros(self.worlds, np.bool_)
     report["tracking"] = np.zeros(self.worlds)
@@ -466,12 +477,12 @@ class PickPlaceEnv:
     for world in range(self.worlds):
       kept = int(self._at[world]) + offset
       self._frames[world][kept] = seen[world]
-      floor = kept - self.cfg.camera_lag
+      floor = kept - self.lag
       for older in [row for row in self._frames[world] if row < floor]:
         del self._frames[world][older]
 
   def _sample(self, row: int) -> None:
-    """Keep every world's hands at one row of the step timeline."""
+    """Keep every world's hands at one row."""
     self._states[:, :, row] = self.scene.observe(self.plant.qpos)
 
   def _tracking(self) -> Float64Array:
@@ -504,10 +515,10 @@ class PickPlaceEnv:
 
   def _observe(self) -> dict[str, Any]:
     """The rows this step spanned, and the frame that has caught up with it."""
-    taken = self._at - self.cfg.camera_lag
+    taken = self._at - self.lag
     frames = [self._frames[world][int(when)] for world, when in enumerate(taken)]
     out: dict[str, Any] = {
-      "step": np.stack(
+      "row": np.stack(
         [np.arange(one - self.rows + 1, one + 1, dtype=np.int64) for one in self._at]
       )
     }
@@ -518,7 +529,7 @@ class PickPlaceEnv:
         fields["opening"] = self._states[:, hand, :, 7].copy()
       if slot in self.lenses:
         fields["image"] = np.stack([frame[slot] for frame in frames])
-        fields["image_step"] = taken.copy()
+        fields["image_row"] = taken.copy()
       if fields:
         out[slot] = fields
     return out

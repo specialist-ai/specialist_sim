@@ -1,7 +1,7 @@
 """What an action and an observation look like.
 
-An action is a trajectory: ``HORIZON`` poses spaced ``1 / ACTION_HZ`` apart,
-naming where the hands should be from now to ``HORIZON / ACTION_HZ`` ahead. A
+An action is a trajectory: ``HORIZON`` poses spaced one action period apart,
+naming where the hands should be from now to ``HORIZON`` periods ahead. A
 control step tracks the poses that fall inside it and discards the rest, so the
 trajectory reaches past what one step executes and is finer than one step
 resolves.
@@ -23,9 +23,7 @@ import numpy as np
 from specialist_sim.arrays import Int64Array
 
 __all__ = [
-  "ROWS_PER_POSE",
   "pose_rows",
-  "ACTION_HZ",
   "FINGER_HIGH",
   "FINGER_LOW",
   "FINGER_OPEN",
@@ -34,7 +32,6 @@ __all__ = [
   "HORIZON",
   "MASK_RADIUS",
   "PER_HAND",
-  "F_STEP",
   "gripper_from_opening",
   "gym_spaces",
   "opening_from_gripper",
@@ -47,12 +44,6 @@ MASK_RADIUS = 0.5
 """How much of the frame's width the observation keeps, as a radius from its
 centre. The recorded observations are blanked outside the same disc, and the
 lens model stays invertible a little past it."""
-
-ACTION_HZ = 50.0
-"""How often a trajectory names a pose."""
-F_STEP = 100.0
-"""How often the step timeline ticks. A row is one of its ticks, and it is the
-rate a corpus records a hand at."""
 
 FINGER_LOW = -0.261799
 FINGER_HIGH = 0.698132
@@ -77,14 +68,11 @@ def opening_from_gripper(angle: float) -> float:
 HORIZON = 16
 """How many poses a trajectory names."""
 
-ROWS_PER_POSE = round(F_STEP / ACTION_HZ)
-"""How many rows of the step timeline one pose of a trajectory spans."""
 
-
-def pose_rows(anchor: int, poses: int = HORIZON) -> Int64Array:
+def pose_rows(anchor: int, rows_per_pose: int, poses: int = HORIZON) -> Int64Array:
   """The rows a trajectory planned at ``anchor`` names: pose ``i`` is reached
-  at the end of the ``i``-th span after the anchor."""
-  return anchor + ROWS_PER_POSE * np.arange(1, poses + 1, dtype=np.int64)
+  at the end of the ``i``-th span of ``rows_per_pose`` after the anchor."""
+  return anchor + rows_per_pose * np.arange(1, poses + 1, dtype=np.int64)
 
 
 PER_HAND = 8
@@ -102,7 +90,7 @@ def gym_spaces(
   An observation carries every row a control step spanned, and says which row
   each one is. The rows are the robot's own clock: exact, and current as of the
   boundary the step returns at. The image is on the camera's clock, which runs
-  behind the robot's, so it is quarantined behind ``image_step``, the row it was
+  behind the robot's, so it is quarantined behind ``image_row``, the row it was
   captured at. A driven hand carries its rows; a lens carries its image; a
   slot that is both carries both.
   """
@@ -114,7 +102,7 @@ def gym_spaces(
   }
   image_of = {
     "image": gym.spaces.Box(0, 255, image_shape, np.uint8),
-    "image_step": gym.spaces.Box(-(2**31), 2**31 - 1, (), np.int64),
+    "image_row": gym.spaces.Box(-(2**31), 2**31 - 1, (), np.int64),
   }
   slots: dict[str, Any] = {}
   for slot in GRIPPERS:
@@ -126,7 +114,7 @@ def gym_spaces(
     if fields:
       slots[slot] = gym.spaces.Dict(fields)
   observation = gym.spaces.Dict(
-    {"step": gym.spaces.Box(-(2**31), 2**31 - 1, (rows,), np.int64), **slots}
+    {"row": gym.spaces.Box(-(2**31), 2**31 - 1, (rows,), np.int64), **slots}
   )
   action = gym.spaces.Box(
     -np.inf, np.inf, (HORIZON, PER_HAND * len(driven)), np.float32

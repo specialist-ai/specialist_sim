@@ -65,10 +65,10 @@ def test_the_derivation_is_the_same_whatever_order_the_rows_arrive_in() -> None:
   cube = np.zeros((sessions * rows, 3))
   cube[:, :2] = np.repeat(rng.uniform(0.35, 0.6, (sessions, 2)), rows, 0)
   cube[0::rows, :2] = (0.49, 0.0)
-  step = np.tile(np.arange(rows), sessions)
+  row = np.tile(np.arange(rows), sessions)
   first = derive(closings(cube, opening, segment), opened(cube, segment), 99.0, 5.0)
   shuffled = rng.permutation(len(segment))
-  order = np.lexsort((step[shuffled], segment[shuffled]))
+  order = np.lexsort((row[shuffled], segment[shuffled]))
   back = shuffled[order]
   again = derive(
     closings(cube[back], opening[back], segment[back]),

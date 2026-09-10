@@ -26,7 +26,7 @@ ALONE = replace(BIMANUAL, driven=ONE.slots)
 def test_a_rig_of_one_hand_holds_and_shows_that_hand_alone() -> None:
   env = PickPlaceEnv(replace(SMALL, embodiment=ONE, task=ALONE))
   obs, _ = env.reset(seed=0)
-  assert set(obs) == {"step", "right_gripper"}
+  assert set(obs) == {"row", "right_gripper"}
   assert set(env.cameras) == {"right_gripper"}
   assert [hand.slot for hand in env.scene.hands] == ["right_gripper"]
   assert env.action_space.shape == (HORIZON, PER_HAND)

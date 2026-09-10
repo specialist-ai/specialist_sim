@@ -28,7 +28,6 @@ from specialist_sim.env import PickPlaceEnv
 from specialist_sim.expert_cfg import ExpertCfg
 from specialist_sim.randomise import HOME_ROTATION, home
 from specialist_sim.spaces import (
-  ACTION_HZ,
   FINGER_OPEN,
   FINGER_SHUT,
   GRIPPERS,
@@ -203,7 +202,7 @@ class Expert:
   ):
     self.scene, self.judge, self.rng = env.scene, env.judge, rng
     self.cfg = cfg or ExpertCfg()
-    self.period = 1.0 / ACTION_HZ
+    self.period = 1.0 / env.cfg.action_hz
     self.tracked = env.ramp.tracked
     """How many of the poses it emits a control step executes."""
     self.stage = 0

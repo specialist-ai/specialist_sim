@@ -4,7 +4,7 @@ A grasp stands where the cube stood when the fingers shut on it, so the region
 a policy was shown is the ring around every closing in the corpus it learned
 from, with the hole around the tape those closings keep clear of. Derived at
 evaluation time — corpus in, ``Region`` out — and deterministic: rows are
-ordered by session and step before anything is reduced, so any process
+ordered by session and row before anything is reduced, so any process
 derives the same region from the same corpus.
 """
 
@@ -34,8 +34,8 @@ ENGAGED = 0.15
 30 mm cube near +0.02 rad and each other at -0.16, so a crossing here is a
 grasp under way rather than a hand travelling open."""
 
-STEP = "step"
-"""The corpus's step lattice, which orders a session's rows."""
+ROW = "row"
+"""The corpus's lattice index, which orders a session's rows."""
 
 CUBE = "/state/cube/pose:Transform3D:translation"
 OPENING = "/state/{hand}/opening:Scalars:scalars"
@@ -125,23 +125,23 @@ def _rows(
   catalog_url: str, dataset: str
 ) -> tuple[Float64Array, Float64Array, np.ndarray]:
   """Every row's cube position, right opening and session, ordered by session
-  and step. The catalog returns rows in whatever order it scanned them."""
+  and row. The catalog returns rows in whatever order it scanned them."""
   from datafusion import col
   from rerun.catalog import CatalogClient
 
   # The client and the dataset must outlive the frame, whose context they hold.
   client = CatalogClient(catalog_url)
   entry = client.get_dataset(dataset)
-  frame = entry.reader(index=STEP)
+  frame = entry.reader(index=ROW)
   names = frame.schema().names
   place = next(name for name in names if "cube" in name and "translation" in name)
   grip = next(name for name in names if "right" in name and "opening" in name)
   table = frame.select(
-    col("rerun_segment_id"), col(STEP), col(f'"{place}"'), col(f'"{grip}"')
+    col("rerun_segment_id"), col(ROW), col(f'"{place}"'), col(f'"{grip}"')
   ).to_arrow_table()
   segment = table.column(0).to_numpy(zero_copy_only=False)
-  step = table.column(1).to_numpy(zero_copy_only=False).astype(np.int64)
-  order = np.lexsort((step, segment))
+  row = table.column(1).to_numpy(zero_copy_only=False).astype(np.int64)
+  order = np.lexsort((row, segment))
   return (
     _numbers(table.column(2), 3)[order],
     _numbers(table.column(3), 1)[order, 0],

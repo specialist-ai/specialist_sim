@@ -62,7 +62,7 @@ def test_a_one_hand_task_reproduces_the_two_hand_run_that_held_the_other(
 def test_a_one_hand_task_shows_and_commands_that_hand_alone() -> None:
   env = _env(right_task(PATCH), FloatingCfg())
   obs, _ = env.reset(seed=0)
-  assert set(obs) == {"step", "right_gripper"}
+  assert set(obs) == {"row", "right_gripper"}
   assert env.action_space.shape == (HORIZON, PER_HAND)
   assert flat_row(obs).shape == (PER_HAND,)
   with pytest.raises(ValueError, match="shape"):
@@ -144,8 +144,8 @@ def test_a_task_may_see_a_lens_it_does_not_drive() -> None:
     FloatingCfg(),
   )
   obs, _ = env.reset(seed=0)
-  assert set(obs) == {"step", "left_gripper", "right_gripper"}
-  assert set(obs["left_gripper"]) == {"image", "image_step"}
-  assert set(obs["right_gripper"]) == {"pose", "opening", "image", "image_step"}
+  assert set(obs) == {"row", "left_gripper", "right_gripper"}
+  assert set(obs["left_gripper"]) == {"image", "image_row"}
+  assert set(obs["right_gripper"]) == {"pose", "opening", "image", "image_row"}
   assert flat_row(obs).shape == (PER_HAND,)
-  assert env.observation_space["left_gripper"].keys() == {"image", "image_step"}
+  assert env.observation_space["left_gripper"].keys() == {"image", "image_row"}

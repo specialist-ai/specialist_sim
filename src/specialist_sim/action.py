@@ -2,7 +2,7 @@
 impedance that chases it on a free rig.
 
 An action is a trajectory of absolute poses in the room frame,
-``[position(3), quaternion(4), opening(1)]`` per hand, at ``1 / ACTION_HZ``
+``[position(3), quaternion(4), opening(1)]`` per hand, one action period
 intervals from now. An opening is the coupled finger angle in radians, signed as
 the left finger turns, which is the number a corpus records. A control step
 tracks the leading poses and drops the rest, so a policy commits to further
@@ -25,7 +25,7 @@ import numpy as np
 from specialist_sim.arrays import Float64Array
 from specialist_sim.control import CTRL, XFRC, FingerServos
 from specialist_sim.embodiment import FreeHand, Hand, carried
-from specialist_sim.spaces import ACTION_HZ, HORIZON, PER_HAND
+from specialist_sim.spaces import HORIZON, PER_HAND
 
 if TYPE_CHECKING:
   from specialist_sim.scene import Scene
@@ -88,10 +88,13 @@ class Ramp:
     max_speed: float,
     max_turn: float,
     worlds: int,
+    action_hz: float,
   ):
     self.hands, self.substeps, self.worlds = hands, substeps, worlds
     self.max_speed, self.max_turn = max_speed, max_turn
-    tracked = control_dt * ACTION_HZ
+    self.action_hz = action_hz
+    """How often the trajectory it resamples names a pose."""
+    tracked = control_dt * action_hz
     if not np.isclose(tracked, round(tracked)):
       raise ValueError("a control step must span a whole number of poses")
     self.tracked = round(tracked)
@@ -183,8 +186,8 @@ class Ramp:
     """
     return np.concatenate(
       [
-        _capped(step * ACTION_HZ, self.max_speed),
-        _capped(spin * ACTION_HZ, self.max_turn),
+        _capped(step * self.action_hz, self.max_speed),
+        _capped(spin * self.action_hz, self.max_turn),
       ]
     )
 

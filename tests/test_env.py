@@ -20,8 +20,8 @@ def env(embodiment: EmbodimentCfg) -> PickPlaceEnv:
 
 def test_a_reset_reports_every_camera_and_the_hands(env: PickPlaceEnv) -> None:
   obs, info = env.reset(seed=0)
-  assert sorted(obs) == sorted([*GRIPPERS, "step"])
-  assert obs["step"][0].tolist() == list(range(1 - env.rows, 1))
+  assert sorted(obs) == sorted([*GRIPPERS, "row"])
+  assert obs["row"][0].tolist() == list(range(1 - env.rows, 1))
   for name in GRIPPERS:
     hand = obs[name]
     assert hand["image"].shape == (env.worlds, *env.image_shape)
@@ -31,7 +31,7 @@ def test_a_reset_reports_every_camera_and_the_hands(env: PickPlaceEnv) -> None:
     assert hand["opening"].shape == (env.worlds, env.rows)
     assert np.array_equal(hand["pose"][0], np.tile(hand["pose"][0, -1], (env.rows, 1)))
     assert np.array_equal(hand["opening"][0], np.full(env.rows, hand["opening"][0, -1]))
-    assert hand["image_step"][0] == -env.cfg.camera_lag
+    assert hand["image_row"][0] == -env.lag
   assert flat_row(obs).shape == (PER_HAND * len(GRIPPERS),)
   assert set(info) == set(env.step(hold(flat_row(obs)))[4])
 
@@ -116,7 +116,7 @@ def test_reset_reports_what_the_cube_is_actually_doing() -> None:
 
 
 def _delivered(
-  lag: int, steps: int = 8
+  lag: float, steps: int = 8
 ) -> tuple[dict[tuple[str, int], Any], Any, list[int], int]:
   """Every frame a run hands over, by the row it says the frame was taken at,
   beside the plant's state at each step and the rows those frames came from."""
@@ -129,9 +129,9 @@ def _delivered(
   for _ in range(steps):
     obs, _, _, _, _ = env.step(action)
     qpos.append(env.scene.data.qpos.copy())
-    taken.append(int(obs[GRIPPERS[0]]["image_step"][0]))
+    taken.append(int(obs[GRIPPERS[0]]["image_row"][0]))
     for slot in GRIPPERS:
-      seen[(slot, int(obs[slot]["image_step"][0]))] = obs[slot]["image"][0].copy()
+      seen[(slot, int(obs[slot]["image_row"][0]))] = obs[slot]["image"][0].copy()
   return seen, np.asarray(qpos), taken, env.rows
 
 
@@ -142,8 +142,8 @@ def test_a_lagging_camera_delivers_what_a_level_one_saw() -> None:
   Rows line up to compare only when the lag is a whole number of them; the
   plant is left alone at any lag, which the test below holds.
   """
-  live, plain, _, _ = _delivered(0)
-  late, lagged, _, _ = _delivered(20)
+  live, plain, _, _ = _delivered(0.0)
+  late, lagged, _, _ = _delivered(0.2)
   assert np.array_equal(plain, lagged), "the camera moved the plant"
   shared = sorted({row for _, row in late} & {row for _, row in live})
   assert len(shared) >= 5, f"the two runs only share {len(shared)} rows"
@@ -161,18 +161,19 @@ def test_a_camera_that_lags_leaves_the_plant_alone() -> None:
   A lag that is not a whole number of rows is what takes that path: the frame is
   captured inside the step rather than at the boundary it ends on.
   """
-  _, plain, _, rows = _delivered(0)
-  for lag in (3, 17, 20):
+  _, plain, _, rows = _delivered(0.0)
+  for lag in (0.03, 0.17, 0.2):
     _, lagged, taken, _ = _delivered(lag)
-    assert np.array_equal(plain, lagged), f"a camera {lag} rows behind moved the plant"
-    assert any(row % rows for row in taken) == bool(lag % rows), (
-      f"a lag of {lag} rows did not capture where it was meant to"
+    assert np.array_equal(plain, lagged), f"a camera {lag} s behind moved the plant"
+    behind = round(lag * PickPlaceCfg().f_row)
+    assert any(row % rows for row in taken) == bool(behind % rows), (
+      f"a lag of {lag} s did not capture where it was meant to"
     )
 
 
 def test_a_camera_lag_the_stack_cannot_hold_is_refused() -> None:
-  for lag in (-1, MAX_LAG + 1):
-    with pytest.raises(ValueError, match="rows behind"):
+  for lag in (-0.01, MAX_LAG + 0.01):
+    with pytest.raises(ValueError, match="s behind"):
       PickPlaceEnv(PickPlaceCfg(camera_lag=lag))
 
 
@@ -182,11 +183,11 @@ def test_a_step_reports_the_rows_it_spanned(env: PickPlaceEnv) -> None:
   action = hold(flat_row(obs))
   for step in range(1, 4):
     obs, _, _, _, _ = env.step(action)
-    assert obs["step"][0].tolist() == list(
+    assert obs["row"][0].tolist() == list(
       range((step - 1) * env.rows + 1, step * env.rows + 1)
     )
     for slot in GRIPPERS:
-      assert obs[slot]["image_step"][0] == obs["step"][0][-1] - env.cfg.camera_lag
+      assert obs[slot]["image_row"][0] == obs["row"][0][-1] - env.lag
 
 
 def test_one_world_restarts_while_the_others_carry_on(
@@ -199,17 +200,17 @@ def test_one_world_restarts_while_the_others_carry_on(
   action = np.stack([hold(flat_row(obs, world=w)) for w in range(3)])
   for _ in range(3):
     obs, *_ = env.step(action)
-  assert obs["step"][:, -1].tolist() == [3 * env.rows] * 3
+  assert obs["row"][:, -1].tolist() == [3 * env.rows] * 3
   carried = obs[GRIPPERS[0]]["pose"][[0, 2], -1].copy()
 
   obs, _ = env.reset(seeds=[7], worlds=[1])
-  assert obs["step"][1, -1] == 0, "the restarted world keeps counting"
-  assert obs["step"][0, -1] == 3 * env.rows, "the others were restarted with it"
+  assert obs["row"][1, -1] == 0, "the restarted world keeps counting"
+  assert obs["row"][0, -1] == 3 * env.rows, "the others were restarted with it"
   assert np.array_equal(obs[GRIPPERS[0]]["pose"][[0, 2], -1], carried)
 
   action = np.stack([hold(flat_row(obs, world=w)) for w in range(3)])
   obs, *_ = env.step(action)
-  assert obs["step"][:, -1].tolist() == [4 * env.rows, env.rows, 4 * env.rows]
+  assert obs["row"][:, -1].tolist() == [4 * env.rows, env.rows, 4 * env.rows]
 
 
 def test_a_reset_refuses_a_world_it_does_not_have() -> None:

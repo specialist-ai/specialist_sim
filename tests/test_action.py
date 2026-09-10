@@ -77,12 +77,9 @@ def test_a_half_turn_of_error_asks_for_a_half_turn_of_correction() -> None:
 def test_a_coarser_ramp_is_the_finer_one_sampled() -> None:
   """A ramp laid on a follower's coarser clock passes through the same setpoints."""
   rng = np.random.default_rng(0)
-  fine = Ramp(
-    hands=1, substeps=200, control_dt=0.1, max_speed=1.5, max_turn=10.0, worlds=1
-  )
-  coarse = Ramp(
-    hands=1, substeps=50, control_dt=0.1, max_speed=1.5, max_turn=10.0, worlds=1
-  )
+  rates = {"control_dt": 0.1, "max_speed": 1.5, "max_turn": 10.0, "worlds": 1}
+  fine = Ramp(hands=1, substeps=200, action_hz=50.0, **rates)
+  coarse = Ramp(hands=1, substeps=50, action_hz=50.0, **rates)
   stride = fine.substeps // coarse.substeps
   start = np.array([[[0.5, 0.0, -0.1, 1.0, 0.0, 0.0, 0.0, 0.2]]])
   for ramp in (fine, coarse):

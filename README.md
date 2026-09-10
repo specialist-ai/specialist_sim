@@ -22,17 +22,17 @@ The interface follows Gymnasium; the package does not depend on it.
 
 A hand is eight numbers: its gripper base's room-frame position, a rotation
 as a quaternion, and a finger opening in radians. One such vector is a pose.
-An observation carries every row of the 100 Hz step timeline a control step
-spanned, for each hand the task drives, with a leading axis over the worlds
-the environment holds:
+An observation carries every row of the row timeline — `f_row`, 100 Hz by
+default — a control step spanned, for each hand the task drives, with a leading
+axis over the worlds the environment holds:
 
 | key | shape | meaning |
 | --- | --- | --- |
-| `observation["step"]` | `(worlds, rows)` int64 | the rows this step spanned |
+| `observation["row"]` | `(worlds, rows)` int64 | the rows this step spanned |
 | `observation[slot]["pose"]` | `(worlds, rows, 7)` float32 | the base's position and quaternion at each row |
 | `observation[slot]["opening"]` | `(worlds, rows)` float32 | the finger angle at each row |
 | `observation[slot]["image"]` | `(worlds, image_size, image_size, 3)` uint8 | what the lens saw, blanked outside the disc |
-| `observation[slot]["image_step"]` | `(worlds,)` int64 | the row that frame was taken at |
+| `observation[slot]["image_row"]` | `(worlds,)` int64 | the row that frame was taken at |
 | `action` | `(worlds, 16, 8 × hands)` float64 | the trajectory the driven hands follow over the next 0.32 s |
 
 `observation.flat_row` lays one world's hands out like one row of the action,

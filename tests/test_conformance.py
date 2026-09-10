@@ -25,14 +25,14 @@ class _Adapter(gym.Env):  # type: ignore[misc,name-defined]
   @staticmethod
   def _alone(observation: dict[str, Any]) -> dict[str, Any]:
     """The environment answers for every world; a Gymnasium env has one."""
-    out: dict[str, Any] = {"step": observation["step"][0]}
-    for slot in [key for key in observation if key != "step"]:
+    out: dict[str, Any] = {"row": observation["row"][0]}
+    for slot in [key for key in observation if key != "row"]:
       hand = observation[slot]
       out[slot] = {
         "pose": hand["pose"][0],
         "opening": hand["opening"][0],
         "image": hand["image"][0],
-        "image_step": hand["image_step"][0],
+        "image_row": hand["image_row"][0],
       }
     return out
 
