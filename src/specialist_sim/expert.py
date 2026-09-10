@@ -51,9 +51,6 @@ _REACHED = 0.010
 """How near a goal counts as arrived."""
 _SEATED = 0.003
 """How near the table a carried cube must be before it is let go."""
-_BRIEF = 0.25
-"""The least time a stage takes, so a move that barely travels still eases in
-and out of it."""
 _DWELL = 1.5
 """How long past its own move a stage may run before the demonstration gives
 up waiting for the plant."""
@@ -90,7 +87,7 @@ _STAGES = (
   _Stage(PICK, "reach", arched=True, window=(0.55, 1.0), at_cube=True),
   _Stage(PICK, "carry", arched=True, loaded=True, window=(0.80, 1.0), turns=False),
   _Stage(PICK, "away", arched=True, window=(0.0, 0.4)),
-  _Stage(PICK, "wait", turns=False),
+  _Stage(PICK, "wait", arched=True),
 )
 
 _FROM_TAPE = next(step for step, stage in enumerate(_STAGES) if stage.name == PICKING)
@@ -194,6 +191,24 @@ class _Grip:
     return self.start + (self.end - self.start) * _eased(within)
 
 
+@dataclass
+class _Drift:
+  """The small move an idle hand is carried along, so it never freezes.
+
+  A hand told to wait repeats one setpoint exactly, and the dataset showed what
+  that costs: 54.8% of the picking hand's executed steps were under a
+  millimeter, against 0.6% of the recordings'. More than half of what a policy
+  learned from a scripted demonstration was an instruction not to move, and it
+  learned it from a hand that had simply been left where it was while the other
+  hand worked. A hand between picks is repositioning, so this one does too.
+  """
+
+  move: _Move
+  grip: _Grip
+  turn: tuple[Float64Array, Float64Array]
+  elapsed: float = 0.0
+
+
 class Expert:
   """The rule-based policy, driven by the scene rather than by a clock."""
 
@@ -222,6 +237,8 @@ class Expert:
     self._pose: Float64Array | None = None
     self._move: _Move | None = None
     self._fingers = _Grip(0.0, 0.0, 0.0, 1.0)
+    self._drift: list[_Drift | None] = [None] * len(GRIPPERS)
+    """Where each hand is drifting while some other hand has the stage."""
     self._turn = (np.zeros(4), np.zeros(4))
     self._turning = 1.0
     self._bearing = np.array([1.0, 0.0, 0.0])
@@ -261,14 +278,84 @@ class Expert:
         out[row, at + 3 : at + 7] = turns[row]
       self._elapsed += self.tracked * self.period
       self._clock += self.tracked * self.period
-      out = np.clip(out, self._low, self._high)
-      self._pose = out[self.tracked - 1].copy()
+      # ``rescue`` is a hard allowance, including when the last attempt has
+      # not reached a cycle boundary. Otherwise a long failed carry can start
+      # before the deadline and make the episode exceed the documented limit
+      # by most of another cycle.
+      if self._length > 0.0 and self._clock >= self._length + self.cfg.rescue:
+        self.done = True
+        self._move = None
+    # Every hand the stage does not drive keeps moving. The stage's own hand
+    # forgets where it was drifting, so the plan it is about to be given starts
+    # from where the drift left it rather than from a stale goal.
+    if not self.done:
+      driven = _STAGES[self.stage].hand if self._move is not None else None
+      for hand in range(len(GRIPPERS)):
+        if hand == driven:
+          self._drift[hand] = None
+        else:
+          self._wander(hand, out)
+    out = np.clip(out, self._low, self._high)
+    self._pose = out[self.tracked - 1].copy()
     # Every trajectory leaves by here, so the fraction the rules reason in
     # becomes the angle the interface names exactly once.
     out[:, self._fingers_at] = FINGER_SHUT + out[:, self._fingers_at] * (
       FINGER_OPEN - FINGER_SHUT
     )
     return out
+
+  def _wander(self, hand: int, out: Float64Array) -> None:
+    """Carry one idle hand along its drift, planning a new one when it arrives."""
+    at = hand * PER_HAND
+    drift = self._drift[hand]
+    if drift is None or drift.elapsed >= drift.move.span:
+      self._drift[hand] = drift = self._drifting(hand, at)
+    whens = drift.elapsed + np.arange(1, HORIZON + 1) * self.period
+    spin = np.empty(3)
+    mujoco.mju_subQuat(spin, drift.turn[1], drift.turn[0])
+    turns = slerp(
+      drift.turn[0], spin, np.array([_eased(float(w) / drift.move.span) for w in whens])
+    )
+    for row, when in enumerate(whens):
+      out[row, at : at + 3] = drift.move.at(float(when))
+      out[row, at + PER_HAND - 1] = drift.grip.at(float(when) / drift.move.span)
+      out[row, at + 3 : at + 7] = turns[row]
+    drift.elapsed += self.tracked * self.period
+
+  def _drifting(self, hand: int, at: int) -> _Drift:
+    """A short step toward somewhere else on this hand's own side of the tape.
+
+    It aims at a parked spot, which is already defined to be clear of the other
+    hand, and travels only part of the way there, so a drift stays inside the
+    annulus a parked hand belongs in and cannot wander onto the tape or into the
+    hand that is working.
+
+    Only the picking hand's fingers move. The kicking hand never opens in either
+    dataset -- its opening spans 0.0058 rad across the recordings and 0.0001 here
+    -- so drifting it would invent a behavior neither has.
+    """
+    assert self._pose is not None
+    cfg = self.cfg
+    start = np.asarray(self._pose[at : at + 3], np.float64).copy()
+    held = float(self._pose[at + PER_HAND - 1])
+    toward = self._parked(hand) - start
+    far = float(np.linalg.norm(toward))
+    want = float(self.rng.uniform(*cfg.loiter))
+    goal = start + toward * (want / far) if far > 1e-9 else start
+    span = max(self.cfg.brief, _PEAK * (want + 2.0 * cfg.skim) / cfg.idle_speed)
+    self._wrist[hand] = self.rng.normal(0.0, cfg.wrist)
+    return _Drift(
+      _Move.plan(start, np.zeros(3), goal, span, cfg.skim),
+      _Grip(held, self._clearance() if hand == PICK else held, 0.0, 1.0),
+      (
+        np.asarray(self._pose[at + 3 : at + 7], np.float64).copy(),
+        se3.wxyz(self._facing(hand)),
+      ),
+    )
+
+  def _clearance(self) -> float:
+    """An opening that clears the cube, drawn afresh so it is never one number."""
+    return float(self.rng.uniform(*self.cfg.clear))
 
   def _settle(self, reached: Float64Array, cube: Float64Array) -> None:
     """Plan the stage that is due, and leave it once its move has run and the
@@ -352,7 +439,7 @@ class Expert:
     held = float(self._pose[at + PER_HAND - 1])
     bulge = self._arch(stage, start, goal)
     span = self._paced() * max(
-      _BRIEF,
+      self.cfg.brief,
       self._travel(start, goal, speed, bulge),
       self._gripping(stage, held, opening),
     )
@@ -390,9 +477,9 @@ class Expert:
     return spun
 
   def _paced(self) -> float:
-    """How much this cycle stretches its stages, and how the episode wearies."""
+    """How much this cycle stretches its stages, and how the episode quickens."""
     gone = min(self._clock / max(self._length, self.period), 1.0)
-    return self._pace * self._tempo * (1.0 + self.cfg.tire * gone)
+    return self._pace * self._tempo * (1.0 - self.cfg.hurry * gone)
 
   def _onward(
     self, stage: _Stage, cube: Float64Array, goal: Float64Array
@@ -479,9 +566,15 @@ class Expert:
       return seat - cfg.swing * self._bearing, 0.0, None
     if stage.name == "strike":
       return seat + cfg.swing * self._bearing, 0.0, self._sweep
-    if stage.name in ("withdraw", "away"):
-      opening = 0.0 if stage.name == "withdraw" else cfg.clear
-      return self._parked(stage.hand), opening, None
+    if stage.name == "withdraw":
+      return self._parked(stage.hand), 0.0, None
+    if stage.name == "away":
+      # The measured table puts the tape well forward of a hand's home. Moving
+      # straight home after release would therefore cross the cube. Lift clear
+      # where it was released; the following wait can park above the table.
+      clear = np.asarray(reached[at : at + 3], np.float64).copy()
+      clear[2] = home(self.scene, stage.hand)[2]
+      return clear, self._clearance(), None
     if stage.name == "reach":
       return seat, self._grip, None
     if stage.loaded:
@@ -490,7 +583,10 @@ class Expert:
         self._grip + cfg.freed,
         None,
       )
-    return reached[at : at + 3], cfg.clear, None
+    # The stage that used to stand over the cube it had just let go now steps
+    # off to a fresh spot, so the picking hand is traveling between picks the
+    # way the recorded one is rather than holding its last command.
+    return self._parked(stage.hand), self._clearance(), None
 
   def _swept(self, cube: Float64Array) -> None:
     """Pick where this kick lands the cube, and how hard to sweep to put it

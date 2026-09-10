@@ -57,9 +57,14 @@ VARIANT = "specialist_actuated"
 GRIPPING = 4
 """The contact dimensionality the description marks a gripping surface with."""
 
-FINGER_HZ = 50.0
-FINGER_RATIO = 1.0
-"""How fast the finger servo answers a commanded angle, and how it damps."""
+FINGER_STIFFNESS = 650.0
+FINGER_DAMPING = 1.97
+"""What the finger servo holds a commanded angle with.
+
+They are the finger's own armature carried to 105 Hz and critically damped:
+``armature * (2*pi*105)**2`` and ``2 * armature * 2*pi*105``. Written out rather
+than derived, because a derived pair moves with the description's armature and
+every recorded dataset would then have been drawn under a different servo."""
 
 PAD_SOLREF = 0.010
 """How long a pad takes to answer a contact, until the real stiffness is
@@ -208,14 +213,12 @@ def gripper_spec() -> mujoco.MjSpec:
   """The described gripper, hung on a free joint and given this rig's physics."""
   described = mujoco.MjSpec.from_file(str(specialist_description.mjcf_path(VARIANT)))
   described.body("base").add_body(name="lens")
-  turn = 2.0 * np.pi * FINGER_HZ
   for side in ("left", "right"):
     servo = described.actuator(f"{side}_finger")
-    swung = described.joint(f"{side}_finger").armature
     servo.biastype = mujoco.mjtBias.mjBIAS_AFFINE
-    servo.gainprm[0] = swung * turn * turn
-    servo.biasprm[1] = -swung * turn * turn
-    servo.biasprm[2] = -2.0 * FINGER_RATIO * swung * turn
+    servo.gainprm[0] = FINGER_STIFFNESS
+    servo.biasprm[1] = -FINGER_STIFFNESS
+    servo.biasprm[2] = -FINGER_DAMPING
   for geom in described.geoms:
     if geom.condim == GRIPPING:
       geom.solref[0] = PAD_SOLREF
