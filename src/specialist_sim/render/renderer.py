@@ -20,7 +20,10 @@ from specialist_sim.rays import build_rays
 from specialist_sim.render import kernels
 from specialist_sim.render.scene import gather
 
-__all__ = ["Renderer", "View", "seat"]
+__all__ = ["HOUSING", "Renderer", "View", "seat"]
+
+HOUSING = ("x3_", "protector")
+"""The described parts a housed lens looks out of, and so cannot see."""
 
 
 @dataclass(frozen=True)
@@ -135,10 +138,17 @@ class Renderer:
     """What a lens sits inside, and so cannot see."""
     if not camera.housed:
       return set()
-    base = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{name}_base")
-    if base < 0:
-      raise ValueError(f"{name} is housed, and the scene has no {name}_base body")
-    return {index for index, part in enumerate(self.parts) if part.body == base}
+    housing = tuple(f"{name}_{part}" for part in HOUSING)
+    hidden = {
+      index
+      for index, part in enumerate(self.parts)
+      if (
+        mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, part.geom) or ""
+      ).startswith(housing)
+    }
+    if not hidden:
+      raise ValueError(f"{name} is housed, and the scene draws none of {housing}")
+    return hidden
 
   def _lights(
     self, model: mujoco.MjModel

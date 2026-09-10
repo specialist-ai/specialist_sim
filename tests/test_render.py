@@ -12,6 +12,7 @@ from specialist_sim.calibration import CameraCfg
 from specialist_sim.embodiment import EmbodimentCfg
 from specialist_sim.mei import mei_project, mei_unproject
 from specialist_sim.rays import build_rays
+from specialist_sim.render.renderer import HOUSING
 from specialist_sim.render.scene import gather
 from specialist_sim.spaces import GRIPPERS
 
@@ -64,7 +65,7 @@ def test_a_camera_reports_which_body_each_pixel_struck(
     for slot, view in env.views.items()
   }
   own, other = GRIPPERS
-  assert f"{own}_base" not in seen[own]
+  assert f"{own}_base" in seen[own], "a lens sees the body it is mounted on"
   assert f"{own}_base" in seen[other]
   assert {"table", "cube"} <= seen[own]
 
@@ -164,3 +165,28 @@ def test_a_geom_is_shaded_by_the_material_it_carries() -> None:
 def test_a_geom_that_sets_its_own_rgba_overrides_its_material() -> None:
   model = mujoco.MjModel.from_xml_string(MATERIALS)
   assert _albedo(model)["painted"] == pytest.approx([0.9, 0.4, 0.1], abs=1e-6)
+
+
+def test_a_lens_cannot_see_the_part_it_looks_out_of() -> None:
+  """The camera housing the lens sits in is masked; the rest of the hand is not."""
+  env = PickPlaceEnv(PickPlaceCfg(image_size=64))
+  env.reset(seed=3)
+  renderer = env.renderer
+  assert renderer is not None
+  model = env.scene.model
+  for slot in GRIPPERS:
+    seen = renderer.cameras[slot].seen.numpy()
+    hidden = {
+      mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, renderer.parts[i].geom)
+      for i, drawn in enumerate(seen)
+      if not drawn
+    }
+    housing = tuple(f"{slot}_{part}" for part in HOUSING)
+    assert all(part.startswith(housing) for part in hidden), hidden
+    drawn = {
+      mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, part.geom)
+      for part in renderer.parts
+    }
+    assert hidden == {part for part in drawn if part.startswith(housing)}, (
+      "every drawn part of the camera assembly is masked, not some of them"
+    )

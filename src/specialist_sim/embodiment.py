@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import mujoco
 import numpy as np
+import specialist_description
 
 from specialist_sim.arrays import Float64Array
 from specialist_sim.spaces import (
@@ -50,6 +51,22 @@ __all__ = [
 ]
 
 ASSETS = Path(__file__).parent / "assets"
+
+VARIANT = "specialist_actuated"
+
+GRIPPING = 4
+"""The contact dimensionality the description marks a gripping surface with."""
+
+FINGER_HZ = 50.0
+FINGER_RATIO = 1.0
+"""How fast the finger servo answers a commanded angle, and how it damps."""
+
+PAD_SOLREF = 0.010
+"""How long a pad takes to answer a contact, until the real stiffness is
+measured on the hardware."""
+
+RIG_MASS = 1e-06
+RIG_INERTIA = 1e-09
 
 
 class OutOfReach(ValueError):
@@ -188,9 +205,27 @@ def carried[H: Hand](hand: Hand, by: type[H]) -> H:
 
 
 def gripper_spec() -> mujoco.MjSpec:
-  """The specialist gripper: a rig on a free joint carrying the base, two
-  servoed fingers, and the empty body a lens seats on."""
-  return mujoco.MjSpec.from_file(str(ASSETS / "gripper.xml"))
+  """The described gripper, hung on a free joint and given this rig's physics."""
+  described = mujoco.MjSpec.from_file(str(specialist_description.mjcf_path(VARIANT)))
+  described.body("base").add_body(name="lens")
+  turn = 2.0 * np.pi * FINGER_HZ
+  for side in ("left", "right"):
+    servo = described.actuator(f"{side}_finger")
+    swung = described.joint(f"{side}_finger").armature
+    servo.biastype = mujoco.mjtBias.mjBIAS_AFFINE
+    servo.gainprm[0] = swung * turn * turn
+    servo.biasprm[1] = -swung * turn * turn
+    servo.biasprm[2] = -2.0 * FINGER_RATIO * swung * turn
+  for geom in described.geoms:
+    if geom.condim == GRIPPING:
+      geom.solref[0] = PAD_SOLREF
+  spec = mujoco.MjSpec()
+  rig = spec.worldbody.add_body(name="rig")
+  rig.add_freejoint(name="rig")
+  rig.mass = RIG_MASS
+  rig.inertia = [RIG_INERTIA] * 3
+  spec.attach(described, prefix="", frame=rig.add_frame())
+  return spec
 
 
 def welded_gripper() -> mujoco.MjSpec:

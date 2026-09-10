@@ -3,14 +3,13 @@ embodiment stands in the room."""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 import mujoco
 import numpy as np
 
 from specialist_sim.arrays import Float64Array
-from specialist_sim.embodiment import ASSETS, Embodiment, Hand
+from specialist_sim.embodiment import ASSETS, GRIPPING, Embodiment, Hand
 from specialist_sim.spaces import FINGER_SHUT, PER_HAND, gripper_from_opening
 
 __all__ = ["SceneCfg", "Scene", "Cube"]
@@ -71,14 +70,11 @@ class Scene:
       sorted(
         geom
         for geom in range(self.model.ngeom)
-        if re.search(
-          r"_pad\d+$",
-          mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom) or "",
-        )
+        if self.model.geom_condim[geom] == GRIPPING
       ),
       np.int64,
     )
-    """Every finger pad's geom, which is what a grasp touches with."""
+    """Every gripping surface's geom, which is what a grasp touches with."""
     self.grasp = self._grasp()
     """Where a hand's pads meet when shut, in its base frame."""
     self.pinch = self._pinch()

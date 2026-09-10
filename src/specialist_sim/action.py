@@ -209,6 +209,8 @@ class Impedance:
       [model.dof_damping[at : at + 6] for at in model.body_dofadr[self._rigs]]
     )
     """What the model slows each rig by, which the feedforward cancels."""
+    self._at_fingers = np.asarray([hand.fingers for hand in hands], np.int64)
+    self._held = _carried(model, free)
     self.servos = FingerServos(hands)
 
   def reset(self, datas: Sequence[mujoco.MjData], worlds: Sequence[int]) -> None:
@@ -234,9 +236,75 @@ class Impedance:
     torque = cfg.rotational_stiffness * _apart(facing, now) + (
       self._damping[:, 3:] * twist[..., 3:]
     )
-    xfrc[:, self._rigs, :3] = force
-    xfrc[:, self._rigs, 3:] = torque
+    lever = _rotated(now, self._mass_at(qpos))
+    xfrc[:, self._rigs, :3] = force + self._held.force
+    xfrc[:, self._rigs, 3:] = torque + _cross(lever, self._held.force)
     self.servos.command(ctrl, ramp.opening[:, substep])
+
+  def _mass_at(self, qpos: Float64Array) -> Float64Array:
+    """Where each gripper's mass sits in its rig's frame, ``(worlds, hands, 3)``."""
+    held = self._held
+    turned = qpos[:, self._at_fingers, None] - held.rest
+    swung = held.cosine * np.cos(turned) + held.sine * np.sin(turned) + held.seated
+    out: Float64Array = held.fixed + (held.share * swung).sum(axis=-2)
+    return out
+
+
+@dataclass(frozen=True)
+class _Held:
+  """What holding a gripper up costs, and where its mass sits.
+
+  A finger's mass swings about its own joint, so its centre is ``seated`` plus
+  a turn of ``cosine`` and ``sine``; the rest of the gripper is ``fixed``.
+  """
+
+  force: Float64Array
+  fixed: Float64Array
+  share: Float64Array
+  cosine: Float64Array
+  sine: Float64Array
+  seated: Float64Array
+  rest: Float64Array
+
+
+def _carried(model: mujoco.MjModel, hands: Sequence[FreeHand]) -> _Held:
+  data = mujoco.MjData(model)
+  mujoco.mj_forward(model, data)
+  force, fixed, share, turned, rest = [], [], [], [], []
+  for hand in hands:
+    frame = data.xmat[hand.rig].reshape(3, 3)
+    origin = data.xpos[hand.rig]
+    mass = float(model.body_subtreemass[hand.rig])
+    force.append(-mass * np.asarray(model.opt.gravity))
+    parts, shares, angles = [], [], []
+    for at in hand.fingers:
+      joint = int(np.flatnonzero(model.jnt_qposadr == at)[0])
+      body = int(model.jnt_bodyid[joint])
+      axis = frame.T @ data.xaxis[joint]
+      axis = axis / np.linalg.norm(axis)
+      anchor = frame.T @ (data.xanchor[joint] - origin)
+      arm = frame.T @ (data.subtree_com[body] - origin) - anchor
+      along = axis * (axis @ arm)
+      parts.append((arm - along, np.cross(axis, arm), along + anchor))
+      shares.append(float(model.body_subtreemass[body]) / mass)
+      angles.append(float(data.qpos[at]))
+    turned.append(parts)
+    share.append(shares)
+    rest.append(angles)
+    fixed.append(
+      frame.T @ (data.subtree_com[hand.rig] - origin)
+      - sum(s * (p[0] + p[2]) for s, p in zip(shares, parts, strict=True))
+    )
+  spun = np.asarray(turned, np.float64)
+  return _Held(
+    force=np.asarray(force, np.float64),
+    fixed=np.asarray(fixed, np.float64),
+    share=np.asarray(share, np.float64)[..., None],
+    cosine=spun[:, :, 0],
+    sine=spun[:, :, 1],
+    seated=spun[:, :, 2],
+    rest=np.asarray(rest, np.float64)[..., None],
+  )
 
 
 def _capped(vector: Float64Array, limit: float) -> Float64Array:
