@@ -190,7 +190,7 @@ def _steps(seen: Recording) -> Int64Array:
 
 def _lattice(seen: Recording, entity: str) -> Int64Array:
   """One entity's step index, the integer row of the state stream."""
-  column = seen.series(f"/{entity}").column(schema.STEP_TIMELINE)
+  column = seen.series(f"/{entity}").column(schema.ROW_TIMELINE)
   out: Int64Array = np.asarray(column.combine_chunks().to_pylist(), np.int64)
   return out
 

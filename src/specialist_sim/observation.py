@@ -1,8 +1,8 @@
 """What the policy sees: each camera's image, and where its own hand has been.
 
-A row is one millisecond. A control step spans several of them and reports them
-all, so a policy reads a hand at the rate a corpus records one rather than at
-the rate it is asked to act.
+A row is one tick of the row lattice, ``f_row``. A control step spans several of
+them and reports them all, so a policy reads a hand at the rate a corpus
+records one rather than at the rate it is asked to act.
 """
 
 from __future__ import annotations

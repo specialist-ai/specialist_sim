@@ -3,7 +3,7 @@
 Follows the Gymnasium interface without importing it.
 
 The environment is a stack of sensors on one clock. A row is one tick of the
-corpus's lattice; a control step spans several and returns at the last of them.
+``f_row`` lattice; a control step spans several and returns at the last of them.
 Every value an observation carries is labeled with the row it happened at, and
 nothing here reports an age or a delay: a reader subtracts.
 """
@@ -23,7 +23,7 @@ from mujoco import rollout
 
 from specialist_sim import randomize, spaces
 from specialist_sim.action import ActionCfg, Ramp
-from specialist_sim.arrays import BoolArray, Float64Array
+from specialist_sim.arrays import BoolArray, Float64Array, Int64Array
 from specialist_sim.calibration import SCENE_VIEW, CameraCfg
 from specialist_sim.control import XFRC, ControllerCfg
 from specialist_sim.embodiment import (
@@ -54,8 +54,11 @@ substeps drifts from an unbroken one."""
 class PickPlaceCfg:
   control_hz: float = 10.0
   f_row: float = 100.0
-  """How often the row timeline ticks: the rate a corpus records a hand at and
-  a deployed loop runs at."""
+  """How often the row timeline ticks, which is the rate a corpus records a hand
+  at and the rate a deployed loop runs at: a multiple of every rate a policy
+  reads, a divisor of the physics rate, no higher than the slowest feedback it
+  answers, and otherwise as low as those allow, since what a fetch costs grows
+  with it."""
   action_hz: float = 50.0
   """How often a trajectory names a pose."""
   camera_hz: float = 30.0
@@ -261,7 +264,8 @@ class PickPlaceEnv:
     """How many rows behind the boundary the stack asks for a frame."""
     asked = self._shutter(self.rows - self.lag)
     self._wanted = (asked - 1) % self.rows + 1
-    """The row within a step an observation reads a lens on."""
+    """The row within a step an observation reads a lens on. Every step asks for
+    the same one, since the lag and the shutter grid both repeat with the step."""
     if substeps % self.rows:
       raise ValueError("a row must span a whole number of physics steps")
     self._per_row = substeps // self.rows
@@ -444,6 +448,7 @@ class PickPlaceEnv:
     self,
     action: Float64Array,
     watch: Callable[[int, Float64Array, Float64Array], None] | None = None,
+    capture: Callable[[Int64Array, list[dict[str, Any]]], None] | None = None,
   ) -> tuple[dict[str, Any], Float64Array, BoolArray, BoolArray, dict[str, Any]]:
     """Track the leading poses of a trajectory, and report where that leaves things.
 
@@ -453,10 +458,16 @@ class PickPlaceEnv:
 
     ``watch`` sees each physics step by its index, with every world's joint
     coordinates and velocities as that step left them, for a caller recording
-    the plant faster than a control step reports it.
+    the plant faster than a control step reports it. ``capture`` sees each
+    rendered row by its absolute row per world, with what every world's lenses
+    saw there, for a caller recording frames faster than the one an observation
+    carries.
     """
     self.ramp.process(action, self._driven)
     plant = self.plant
+    # A lens fires on every shutter row, but only the row an observation reads
+    # has to be rendered -- unless a caller is recording, which wants them all.
+    fires = self._shutters if capture is not None else (self._wanted,)
     # A world is the truth between steps, so anything moved on one since the
     # last step is what this one runs from.
     plant.gather()
@@ -472,10 +483,14 @@ class PickPlaceEnv:
       row = (substep + 1) // self._per_row
       plant.settle()
       self._sample(row - 1)
-      if row == self._wanted:
+      if row in fires:
+        # The renderer reads the worlds' own data, so the stepped state has to be
+        # put back on them before a lens can see it.
         plant.land()
-        self._keep(row)
-    if self._wanted != self.rows:
+        seen = self._keep(row)
+        if capture is not None:
+          capture(self._at + row, seen)
+    if fires[-1] != self.rows:
       plant.land()
     self._at += self.rows
     self._steps += 1
@@ -492,7 +507,7 @@ class PickPlaceEnv:
     report["tracking"] = self._tracking()
     return self._observe(), reward, terminated, truncated, report
 
-  def _keep(self, offset: int) -> None:
+  def _keep(self, offset: int) -> list[dict[str, Any]]:
     """Hold what every world's lenses see, on the row each of them is taking,
     and let go of every row no future observation can ask for."""
     seen = self._render()
@@ -502,6 +517,7 @@ class PickPlaceEnv:
       floor = kept - self.lag - self.rows
       for older in [row for row in self._frames[world] if row < floor]:
         del self._frames[world][older]
+    return seen
 
   def _shutter(self, row: int) -> int:
     """The row the newest frame taken at or before ``row`` sits on."""

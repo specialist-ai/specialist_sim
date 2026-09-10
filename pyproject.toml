@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Reading a corpus: the region a policy's picks begin in, and a session
-# replayed into the environment.
+# Reading a corpus: the region a policy's picks begin in, a session replayed
+# into the environment, and an episode written back out as one.
 corpus = ["rerun-sdk[datafusion]>=0.36", "specialist-corpus", "av>=13", "imageio-ffmpeg>=0.5"]
 # The spaces as Gymnasium objects.
 gym = ["gymnasium>=1.3"]

@@ -139,8 +139,9 @@ def test_a_lagging_camera_delivers_what_a_level_one_saw() -> None:
   """A frame is quarantined behind the row it was taken at, and is the frame a
   camera keeping up with the rest of the stack took at that row.
 
-  Rows line up to compare only when the lag is a whole number of them; the
-  plant is left alone at any lag, which the test below holds.
+  Rows line up to compare only when the lag is a whole number of control steps,
+  so the lag is read off the environment rather than named; the plant is left
+  alone at any lag, which the test below holds.
   """
   live, plain, _, _ = _delivered(0.0)
   late, lagged, _, _ = _delivered(0.2)
