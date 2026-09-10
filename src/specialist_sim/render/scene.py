@@ -29,6 +29,9 @@ class Part:
   vertices: Float32Array
   faces: Int32Array
   albedo: Float32Array
+  texture: Float32Array | None
+  repeat: Float32Array
+  size: Float32Array
   body: int
   geom: int
 
@@ -97,11 +100,38 @@ def gather(model: mujoco.MjModel) -> list[Part]:
       raise ValueError(
         f"geom {geom} is a {mujoco.mjtGeom(kind).name}, which this renderer cannot draw"
       )
+    material = int(model.geom_matid[geom])
+    texture = -1
+    repeat = np.ones(2, np.float32)
+    if material >= 0:
+      texture = int(model.mat_texid[material, mujoco.mjtTextureRole.mjTEXROLE_RGB])
+      repeat = model.mat_texrepeat[material].astype(np.float32)
+    pixels = None
+    if texture >= 0:
+      if kind != mujoco.mjtGeom.mjGEOM_BOX:
+        raise ValueError(f"textured geom {geom} is not a box")
+      if model.tex_type[texture] != mujoco.mjtTexture.mjTEXTURE_2D:
+        raise ValueError(f"geom {geom} carries a texture that is not two-dimensional")
+      channels = int(model.tex_nchannel[texture])
+      if channels != 3:
+        raise ValueError(f"geom {geom} carries a {channels}-channel texture")
+      width, height = int(model.tex_width[texture]), int(model.tex_height[texture])
+      start = int(model.tex_adr[texture])
+      stop = start + width * height * channels
+      pixels = (
+        model.tex_data[start:stop]
+        .reshape(height, width, channels)
+        .astype(np.float32)
+        / 255.0
+      )
     parts.append(
       Part(
         vertices=local.astype(np.float32),
         faces=face.reshape(-1, 3),
         albedo=rgba[geom][:3],
+        texture=pixels,
+        repeat=repeat,
+        size=model.geom_size[geom].astype(np.float32),
         body=int(model.geom_bodyid[geom]),
         geom=geom,
       )

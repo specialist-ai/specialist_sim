@@ -1,14 +1,12 @@
-"""The room behind everything: a photograph of the capture room, as six faces.
+"""The unfeatured background behind the modeled room, stored as six faces.
 
-The scene owns the surfaces a hand can reach -- the table, the tape, the cube --
-and a photograph owns the rest of the room. MuJoCo loads that photograph as a
-skybox and stores it as six square faces; this module says which way each face
-looks, and hands the faces to the tracer.
+The scene owns the surfaces that establish camera parallax -- the floor, walls,
+table and fiducials. MuJoCo stores the neutral background as six square skybox
+faces; this module says which way each face looks and hands them to the tracer.
 
 The face table is MuJoCo's own ``gridlayout`` lettering, and a compiled model
 returns the faces byte for byte in that lettering's order, which is what
-:data:`ORDER` restates. Nothing here rotates the photograph: ``scripts/skybox.py``
-turns it into the room frame when it builds the asset.
+:data:`ORDER` restates.
 """
 
 from __future__ import annotations
@@ -47,7 +45,7 @@ transpose of one of these is its depth into the face, then its column and row.""
 
 
 def read(model: mujoco.MjModel) -> Float32Array:
-  """The scene's skybox as ``(6, size, size, 3)`` in 0 to 1, in :data:`ORDER`.
+  """The scene's background as ``(6, size, size, 3)`` in 0 to 1.
 
   Raises:
     ValueError: if the scene carries anything but one three-channel skybox.

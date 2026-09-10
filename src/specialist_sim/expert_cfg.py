@@ -52,7 +52,7 @@ class ExpertCfg:
   tempo: tuple[float, float] = (0.85, 1.15)
   """How fast one episode runs against another."""
   reach: tuple[tuple[float, float, float], tuple[float, float, float]] = (
-    (0.25, -0.55, -0.335),
+    (0.25, -0.55, -0.260),
     (0.85, 0.65, 0.25),
   )
   """The corner to corner box a hand is aimed inside: across the table, and no

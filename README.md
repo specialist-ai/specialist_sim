@@ -112,32 +112,32 @@ the lens's seat on the gripper base, so a caller holding a real calibration
 renders through it. The cameras are named for the slots the embodiment holds;
 left unset, every hand carries the nominal camera.
 
-## The room behind it
+## The room around it
 
-The scene owns what a hand can reach -- the table, the tape, the cube -- and a
-photograph owns everything else. `assets/room_skybox.png` is a 360 shot of the
-capture room, and a ray that strikes no geom reads it instead of coming back
-black. There are no wall geoms: a flat box painted the color of plaster is a
-worse likeness of that room than a picture of it, and it moved with the scene's
-lights while the picture carries the light it was taken under.
+The camera sees world-anchored primitive geometry for the blue floor, the two
+walls bounding the work area, the tabletop and its center tape. Their diffuse
+maps add the carpet, painted-plaster and laminate surface detail visible in the
+capture room. Moving a wrist camera therefore produces parallax against every
+nearby surface. Rays that leave the measured patch read a flat skybox color
+rather than a viewpoint-locked photograph.
 
-Two consequences worth knowing before trusting a rendered frame:
+The room frame is the measured capture frame: the midpoint of tag IDs 0 and 1
+is the origin, `+X` points toward the table, `+Y` toward the left wall, and `+Z`
+points up. AprilTags are excluded by default, since not every evaluation wants
+fiducials in its observations. Opt into both measured stands with:
 
-- **The room has no distance.** A skybox is sampled by direction alone, so every
-  surface in it is infinitely far. That is only fair because the photograph was
-  taken inside the workspace, 0.19 m above the table and within 0.1 m of where a
-  hand rests: over the 0.2 m a camera moves, the far wall shifts by under 8
-  degrees. The near surface that would shift more is the table, and the scene
-  draws that itself.
-- **The photograph is not lit by the scene.** It arrives already exposed, so the
-  lights shade geoms and never the sky. A geom and the wall behind it therefore
-  answer to different exposures, and the two only agree by having been matched
-  once by eye.
+```python
+from specialist_sim.scene import SceneCfg
 
-`scripts/skybox.py` rebuilds the asset from an equirectangular panorama and
-carries the measurement that turns it into the room frame: both anchor tags are
-in the shot, and the room is defined by them, so their bearings fix the yaw to
-within about three degrees.
+env = PickPlaceEnv(PickPlaceCfg(scene=SceneCfg(apriltags=True)))
+```
+
+The tag centers are at `z=0`, one metre above the floor. Their exact
+`tagStandard41h12` patterns are assembled from black box primitives so the
+custom tracer and MuJoCo's renderer draw the same fiducials.
+
+`scripts/skybox.py` remains as a utility for legacy panorama experiments, but
+the generated `assets/room_skybox.png` is not loaded by the default room.
 
 ## Starting where you choose
 

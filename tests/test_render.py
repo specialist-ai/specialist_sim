@@ -9,11 +9,12 @@ import pytest
 
 from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.calibration import CameraCfg
-from specialist_sim.embodiment import EmbodimentCfg
+from specialist_sim.embodiment import EmbodimentCfg, FreeHand, carried
 from specialist_sim.mei import mei_project, mei_unproject
 from specialist_sim.rays import build_rays
 from specialist_sim.render.renderer import HOUSING
 from specialist_sim.render.scene import gather
+from specialist_sim.scene import SceneCfg
 from specialist_sim.spaces import GRIPPERS
 
 
@@ -33,6 +34,27 @@ def test_the_two_cameras_see_different_things(observation: dict[str, Any]) -> No
   assert not np.array_equal(
     observation[GRIPPERS[0]]["image"], observation[GRIPPERS[1]]["image"]
   )
+
+
+def test_a_world_fixed_tag_moves_across_a_translated_camera() -> None:
+  """Nearby room geometry has parallax instead of following the lens."""
+  slot = GRIPPERS[1]
+  env = PickPlaceEnv(PickPlaceCfg(image_size=128, scene=SceneCfg(apriltags=True)))
+  env.reset(seed=3)
+  tag = env.scene.model.body("tag_1").id
+
+  def center() -> np.ndarray:
+    view = env.renderer.render(env.scene.data)[slot]
+    rows, columns = np.where(view.body == tag)
+    assert len(rows) > 0, "the anchor left the camera's field of view"
+    return np.array([columns.mean(), rows.mean()])
+
+  before = center()
+  hand = carried(env.scene.hands[1], FreeHand)
+  env.scene.data.qpos[hand.qpos : hand.qpos + 3] += (0.0, 0.05, 0.0)
+  mujoco.mj_forward(env.scene.model, env.scene.data)
+  after = center()
+  assert np.linalg.norm(after - before) > 1.0
 
 
 def test_nothing_is_drawn_outside_the_lens_disc(observation: dict[str, Any]) -> None:
@@ -130,14 +152,18 @@ def test_a_body_lands_on_the_pixel_the_lens_projects_it_to() -> None:
 MATERIALS = """
 <mujoco>
   <asset>
+    <texture name="checker" type="2d" builtin="checker" width="8" height="8"
+             rgb1="0.2 0.4 0.6" rgb2="0.8 0.6 0.4"/>
     <material name="ink" rgba="0.078 0.078 0.078 1"/>
     <material name="chalk" rgba="0.867 0.867 0.867 1"/>
+    <material name="woven" texture="checker" texrepeat="2 3"/>
   </asset>
   <worldbody>
     <geom name="inked" type="box" size="0.1 0.1 0.1" group="1" material="ink"/>
     <geom name="chalked" type="box" size="0.1 0.1 0.1" group="1" material="chalk"/>
     <geom name="painted" type="box" size="0.1 0.1 0.1" group="1" material="ink"
           rgba="0.9 0.4 0.1 1"/>
+    <geom name="textured" type="box" size="0.1 0.1 0.1" group="1" material="woven"/>
   </worldbody>
 </mujoco>
 """
@@ -165,6 +191,19 @@ def test_a_geom_is_shaded_by_the_material_it_carries() -> None:
 def test_a_geom_that_sets_its_own_rgba_overrides_its_material() -> None:
   model = mujoco.MjModel.from_xml_string(MATERIALS)
   assert _albedo(model)["painted"] == pytest.approx([0.9, 0.4, 0.1], abs=1e-6)
+
+
+def test_a_box_carries_its_diffuse_texture_into_the_tracer() -> None:
+  model = mujoco.MjModel.from_xml_string(MATERIALS)
+  part = next(
+    part
+    for part in gather(model)
+    if mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, part.geom) == "textured"
+  )
+  assert part.texture is not None
+  assert part.texture.shape == (8, 8, 3)
+  assert np.ptp(part.texture) > 0.0
+  assert part.repeat == pytest.approx([2.0, 3.0])
 
 
 def test_a_lens_cannot_see_the_part_it_looks_out_of() -> None:

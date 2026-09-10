@@ -279,6 +279,13 @@ class Expert:
         out[row, at + 3 : at + 7] = turns[row]
       self._elapsed += self.tracked * self.period
       self._clock += self.tracked * self.period
+      # ``rescue`` is a hard allowance, including when the last attempt has
+      # not reached a cycle boundary. Otherwise a long failed carry can start
+      # before the deadline and make the episode exceed the documented limit
+      # by most of another cycle.
+      if self._length > 0.0 and self._clock >= self._length + self.cfg.rescue:
+        self.done = True
+        self._move = None
     # Every hand the stage does not drive keeps moving. The stage's own hand
     # forgets where it was drifting, so the plan it is about to be given starts
     # from where the drift left it rather than from a stale goal.
@@ -560,9 +567,15 @@ class Expert:
       return seat - cfg.swing * self._bearing, 0.0, None
     if stage.name == "strike":
       return seat + cfg.swing * self._bearing, 0.0, self._sweep
-    if stage.name in ("withdraw", "away"):
-      opening = 0.0 if stage.name == "withdraw" else self._clearance()
-      return self._parked(stage.hand), opening, None
+    if stage.name == "withdraw":
+      return self._parked(stage.hand), 0.0, None
+    if stage.name == "away":
+      # The measured table puts the tape well forward of a hand's home. Moving
+      # straight home after release would therefore cross the cube. Lift clear
+      # where it was released; the following wait can park above the table.
+      clear = np.asarray(reached[at : at + 3], np.float64).copy()
+      clear[2] = home(self.scene, stage.hand)[2]
+      return clear, self._clearance(), None
     if stage.name == "reach":
       return seat, self._grip, None
     if stage.loaded:

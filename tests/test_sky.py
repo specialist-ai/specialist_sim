@@ -1,4 +1,4 @@
-"""The room photograph: which way its faces look, and what a missed ray reads."""
+"""The far background: which way its faces look, and what a missed ray reads."""
 
 import mujoco
 import numpy as np
@@ -49,20 +49,14 @@ def test_a_scene_carrying_no_skybox_is_refused() -> None:
     sky.read(mujoco.MjModel.from_xml_string(EMPTY))
 
 
-def test_the_room_is_brighter_below_the_horizon_than_above_it() -> None:
-  """A white table under a dark industrial ceiling, which pins up against down.
-
-  The far wall is toward +x, where the table runs and where a wall geom used to
-  stand; the lab the rig sits in is behind at -x, and darker.
-  """
+def test_the_room_background_has_no_viewpoint_locked_features() -> None:
   faces = sky.read(mujoco.MjModel.from_xml_path(str(ASSETS / "room.xml")))
-  brightness = dict(zip(sky.ORDER, faces.mean(axis=(1, 2, 3)), strict=True))
-  assert brightness["D"] > brightness["U"]
-  assert brightness["R"] > brightness["L"]
+  assert np.ptp(faces, axis=(0, 1, 2)).max() == pytest.approx(0.0)
+  assert faces.mean() > 0.0, "a missed ray is distinguishable from the lens mask"
 
 
-def test_the_lights_shade_the_geoms_and_never_the_room() -> None:
-  """A missed ray carries the photograph's own exposure.
+def test_the_lights_shade_the_geoms_and_never_the_background() -> None:
+  """A missed ray carries the background's fixed exposure.
 
   Dimming the scene moves every lit pixel and no part of the room, which is the
   whole of what it means for the sky to arrive already exposed.

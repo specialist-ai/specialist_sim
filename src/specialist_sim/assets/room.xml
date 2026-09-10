@@ -18,35 +18,112 @@
   </default>
 
   <asset>
-    <!-- A photograph of the capture room, already turned into this frame by
-         scripts/skybox.py; the layout is render/sky.LAYOUT. -->
-    <texture name="room" type="skybox" file="room_skybox.png"
-             gridsize="3 4" gridlayout=".U..LFRB.D.."/>
+    <!-- Missed rays get an unfeatured background. The measured room surfaces
+         below, rather than a viewpoint-locked photograph, provide the scene. -->
+    <texture name="room" type="skybox" builtin="flat" width="16" height="16"
+             rgb1="0.16 0.16 0.17" rgb2="0.16 0.16 0.17"/>
+    <texture name="floor_texture" type="2d" file="floor_texture.png"/>
+    <texture name="wall_texture" type="2d" file="wall_texture.png"/>
+    <texture name="table_texture" type="2d" file="table_texture.png"/>
+    <material name="floor_material" texture="floor_texture" texrepeat="3 3"
+              specular="0" shininess="0"/>
+    <material name="wall_material" texture="wall_texture" texrepeat="4 3"
+              specular="0" shininess="0"/>
+    <material name="table_material" texture="table_texture" texrepeat="2 4"
+              specular="0.08" shininess="0.08"/>
   </asset>
 
-  <!-- The table and the lights are set against the recordings rather than to
-       taste. A wrist frame is mostly table, and this one read brighter, harder
-       and colder than the room's: over sixty frames the bright half of the disc
-       averaged (230, 230, 223) against the recordings' (220, 210, 205), and its
-       luminance ran from a median of 111 to a 90th percentile of 228 where the
-       recordings run 142 to 204 -- twice the dynamic range. Nothing was
-       clipping; it was contrast and colour temperature.
-       The albedo carries the colour. The light balance carries the contrast:
-       diffuse moved into ambient until a shadowed up-facing surface sits 1/1.35
-       of a lit one instead of 1/1.71, holding the total on an up-facing surface
-       at what it was, because the skybox arrives already exposed and the geoms
-       were matched to it by eye. -->
+  <!-- The room frame is fixed by the two tag stands: their midpoint is the
+       origin, +X points toward the table, +Y toward the left wall, and +Z up.
+       The tag centers are one metre above the floor, so the floor is z=-1.
+
+       The 1.20 x 0.60 m tabletop starts 0.40 m past the tag line. Its back and
+       left edges each stand 0.20 m off their wall. Only the two walls bounding
+       this work area are measured; the open sides remain the flat background.
+
+       Geoms other than the tabletop and cube are visual-only. The new room is
+       meant to fix camera parallax without changing the task's contact set. -->
   <worldbody>
     <body name="scene_view"/>
     <light dir="0.282216 0.188144 -0.940721" diffuse="0.3120 0.3120 0.3120" type="directional"/>
     <light castshadow="false" dir="-0.646997 -0.539164 -0.539164" ambient="0.6769 0.6769 0.6769" diffuse="0.3000 0.3000 0.3000" type="directional"/>
-    <body name="table" pos="0.55 0.06 -0.365">
-      <geom name="table" class="solid" size="0.3 0.6 0.03" rgba="0.7621 0.7274 0.7101 1"/>
+
+    <!-- The modeled patch covers the camera's work area and the open approach
+         behind it. Its top face is the measured ground plane at z=-1. -->
+    <body name="ground" pos="-0.15 -0.35 -1.025">
+      <geom name="ground" class="decor" size="1.35 1.15 0.025" material="floor_material"/>
     </body>
-    <body name="tape" pos="0.49 0 -0.335">
-      <geom name="tape" class="decor" size="0.0155 0.013 0.0002" rgba="0.15 0.32 0.7 1"/>
+    <body name="wall_left" pos="-0.15 0.825 0.25">
+      <geom name="wall_left" class="decor" size="1.35 0.025 1.25" material="wall_material"/>
     </body>
-    <body name="cube" pos="0.53 -0.065 -0.32">
+    <body name="wall_far" pos="1.225 -0.35 0.25">
+      <geom name="wall_far" class="decor" size="0.025 1.15 1.25" material="wall_material"/>
+    </body>
+
+    <body name="table" pos="0.70 0 -0.285">
+      <geom name="table" class="solid" size="0.30 0.60 0.025" material="table_material"/>
+    </body>
+    <body name="tape" pos="0.70 0 -0.2598">
+      <geom name="tape" class="decor" size="0.005 0.005 0.0002" rgba="0.15 0.32 0.70 1"/>
+    </body>
+
+    <!-- The measured solve puts the tag centers 1.1267 m apart (the stands
+         were intended to be 1.20 m apart). A tag body's origin is the center
+         of its fiducial plane. Its local +X is image-right, +Y is image-up,
+         and +Z points out of the face. Both faces turn 45 degrees toward +X
+         and toward each other. -->
+    <body name="tag_0" pos="0 0.5633 0" quat="0.6532814824 0.6532814824 0.2705980501 0.2705980501">
+      <geom name="tag_0_back" class="decor" pos="0 0 -0.004" size="0.070 0.070 0.004" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_paper" class="decor" pos="0 0 0.00025" size="0.062 0.062 0.00025" rgba="0.90 0.90 0.88 1"/>
+      <geom name="tag_0_pole" class="decor" pos="0 -0.535 -0.012" size="0.010 0.465 0.010" rgba="0.025 0.025 0.030 1"/>
+      <geom name="tag_0_base" class="decor" pos="0 -0.990 -0.012" size="0.110 0.010 0.110" rgba="0.025 0.025 0.030 1"/>
+
+      <!-- tagStandard41h12 id=0. Adjacent black cells are merged into
+           rectangles; together they are the exact reference-family image. -->
+      <geom name="tag_0_ink_00" class="decor" pos="0 0.033333333 0.00065" size="0.050000000 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_01" class="decor" pos="0 -0.033333333 0.00065" size="0.050000000 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_02" class="decor" pos="-0.038888889 0 0.00065" size="0.011111111 0.016666667 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_03" class="decor" pos="0.033333333 0 0.00065" size="0.005555556 0.027777778 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_04" class="decor" pos="-0.005555556 0 0.00065" size="0.011111111 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_05" class="decor" pos="0.038888889 0.044444444 0.00065" size="0.011111111 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_06" class="decor" pos="0.005555556 -0.044444444 0.00065" size="0.011111111 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_07" class="decor" pos="0.038888889 -0.044444444 0.00065" size="0.011111111 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_08" class="decor" pos="-0.033333333 0.022222222 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_09" class="decor" pos="-0.033333333 -0.022222222 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_10" class="decor" pos="-0.022222222 0.044444444 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_11" class="decor" pos="0.044444444 0.022222222 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_12" class="decor" pos="0.011111111 -0.011111111 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_13" class="decor" pos="0.044444444 -0.022222222 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_14" class="decor" pos="0.044444444 0 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_15" class="decor" pos="-0.011111111 -0.011111111 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_0_ink_16" class="decor" pos="-0.022222222 -0.044444444 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+    </body>
+
+    <body name="tag_1" pos="0 -0.5633 0" quat="0.2705980501 0.2705980501 0.6532814824 0.6532814824">
+      <geom name="tag_1_back" class="decor" pos="0 0 -0.004" size="0.070 0.070 0.004" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_paper" class="decor" pos="0 0 0.00025" size="0.062 0.062 0.00025" rgba="0.90 0.90 0.88 1"/>
+      <geom name="tag_1_pole" class="decor" pos="0 -0.535 -0.012" size="0.010 0.465 0.010" rgba="0.025 0.025 0.030 1"/>
+      <geom name="tag_1_base" class="decor" pos="0 -0.990 -0.012" size="0.110 0.010 0.110" rgba="0.025 0.025 0.030 1"/>
+
+      <!-- tagStandard41h12 id=1. -->
+      <geom name="tag_1_ink_00" class="decor" pos="0 0.033333333 0.00065" size="0.050000000 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_01" class="decor" pos="0 -0.033333333 0.00065" size="0.038888889 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_02" class="decor" pos="-0.033333333 0 0.00065" size="0.005555556 0.027777778 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_03" class="decor" pos="0.033333333 0 0.00065" size="0.005555556 0.027777778 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_04" class="decor" pos="0.027777778 -0.044444444 0.00065" size="0.011111111 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_05" class="decor" pos="0.044444444 0.016666667 0.00065" size="0.005555556 0.011111111 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_06" class="decor" pos="0.044444444 -0.016666667 0.00065" size="0.005555556 0.011111111 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_07" class="decor" pos="0.033333333 0.044444444 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_08" class="decor" pos="-0.011111111 0 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_09" class="decor" pos="0 -0.011111111 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_10" class="decor" pos="-0.044444444 -0.044444444 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_11" class="decor" pos="-0.022222222 0.044444444 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_12" class="decor" pos="-0.044444444 0.011111111 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_13" class="decor" pos="-0.044444444 -0.022222222 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+      <geom name="tag_1_ink_14" class="decor" pos="-0.022222222 -0.044444444 0.00065" size="0.005555556 0.005555556 0.00015" rgba="0.015 0.015 0.018 1"/>
+    </body>
+
+    <body name="cube" pos="0.73 -0.065 -0.245">
       <joint name="cube" type="free"/>
       <geom name="cube" class="solid" size="0.015 0.015 0.015" rgba="0.75 0.12 0.1 1" mass="0.012"/>
     </body>

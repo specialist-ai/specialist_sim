@@ -12,12 +12,17 @@ from specialist_sim.arrays import Float64Array
 from specialist_sim.embodiment import ASSETS, GRIPPING, Embodiment, Hand
 from specialist_sim.spaces import FINGER_SHUT, PER_HAND, gripper_from_opening
 
-__all__ = ["SceneCfg", "Scene", "Cube"]
+__all__ = ["SceneCfg", "Scene", "Cube", "room_spec"]
+
+APRILTAG_BODIES = ("tag_0", "tag_1")
+"""The optional fiducial plates and their stands in the room asset."""
 
 
 @dataclass(frozen=True)
 class SceneCfg:
   physics_dt: float = 1.0 / 3000.0
+  apriltags: bool = False
+  """Whether the two AprilTags and their stands are included."""
 
 
 @dataclass(frozen=True)
@@ -32,9 +37,18 @@ class Cube:
   """The height of its center when it sits on the table."""
 
 
-def _compiled(embodiment: Embodiment) -> mujoco.MjModel:
-  """The room with the embodiment's hands standing in it."""
+def room_spec(apriltags: bool = False) -> mujoco.MjSpec:
+  """The measured room, optionally including its fiducial stands."""
   room = mujoco.MjSpec.from_file(str(ASSETS / "room.xml"))
+  if not apriltags:
+    for name in APRILTAG_BODIES:
+      room.delete(room.body(name))
+  return room
+
+
+def _compiled(cfg: SceneCfg, embodiment: Embodiment) -> mujoco.MjModel:
+  """The configured room with the embodiment's hands standing in it."""
+  room = room_spec(cfg.apriltags)
   embodiment.attach(room)
   return room.compile()
 
@@ -46,7 +60,7 @@ class Scene:
     self.embodiment = embodiment
     self.slots = embodiment.slots
     """The hands the room holds, in ``GRIPPERS``' order."""
-    self.model = _compiled(embodiment)
+    self.model = _compiled(cfg, embodiment)
     self.model.opt.timestep = cfg.physics_dt
     self.data = mujoco.MjData(self.model)
     self._scratch = mujoco.MjData(self.model)

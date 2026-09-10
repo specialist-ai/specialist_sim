@@ -57,8 +57,8 @@ of its own; the table is the color and the lights the balance the recorded
 room reads at, so a wrist frame is exposed the way a capture is; the gripper is
 the described one, held against gravity by
 whatever carries it rather than by a model that cancels its weight; and what a
-ray misses is a photograph of the capture room rather than blackness behind two
-painted walls.
+ray misses beyond the modeled room patch is a neutral background rather than
+blackness.
 """
 
 
