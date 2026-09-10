@@ -29,7 +29,7 @@ class Cube:
   qpos: int
   side: float
   rest: float
-  """The height of its centre when it sits on the table."""
+  """The height of its center when it sits on the table."""
 
 
 def _compiled(embodiment: Embodiment) -> mujoco.MjModel:

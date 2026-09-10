@@ -44,8 +44,8 @@ def build_rays(
   residual = np.linalg.norm(mei_project(bearings, params) - pixels, axis=1)
   valid = np.isfinite(residual) & (residual < ROUND_TRIP)
   if radius is not None:
-    centre = np.array([width, height], np.float64) / 2.0
-    valid &= np.linalg.norm(pixels - centre, axis=1) <= radius * width
+    center = np.array([width, height], np.float64) / 2.0
+    valid &= np.linalg.norm(pixels - center, axis=1) <= radius * width
   return Rays(
     bearings=np.asarray(bearings[valid], np.float32),
     pixel=np.flatnonzero(valid).astype(np.int32),

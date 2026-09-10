@@ -9,7 +9,7 @@ from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
 from specialist_sim.embodiment import EmbodimentCfg, FloatingCfg, FreeHand, carried
 from specialist_sim.observation import flat_row
-from specialist_sim.randomise import Kicked, OnTape, Region
+from specialist_sim.randomize import Kicked, OnTape, Region
 from specialist_sim.spaces import GRIPPERS, HORIZON, PER_HAND
 from specialist_sim.task import (
   BIMANUAL,

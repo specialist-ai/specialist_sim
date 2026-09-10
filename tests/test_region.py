@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from specialist_sim.corpus.region import closings, derive, opened
-from specialist_sim.randomise import Region
+from specialist_sim.randomize import Region
 
 
 def test_the_ring_around_a_corpus_holds_the_closings_it_was_derived_from() -> None:

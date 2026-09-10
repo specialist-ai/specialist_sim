@@ -257,7 +257,7 @@ class Impedance:
 class _Held:
   """What holding a gripper up costs, and where its mass sits.
 
-  A finger's mass swings about its own joint, so its centre is ``seated`` plus
+  A finger's mass swings about its own joint, so its center is ``seated`` plus
   a turn of ``cosine`` and ``sine``; the rest of the gripper is ``fixed``.
   """
 

@@ -10,7 +10,7 @@ from specialist_sim import pose as se3
 from specialist_sim.action import hold
 from specialist_sim.embodiment import EmbodimentCfg
 from specialist_sim.observation import flat_row
-from specialist_sim.randomise import HOME_ROTATION, place_cube
+from specialist_sim.randomize import HOME_ROTATION, place_cube
 from specialist_sim.spaces import (
   FINGER_HIGH,
   FINGER_LOW,
@@ -195,7 +195,7 @@ def test_a_plan_turns_inside_one_control_step() -> None:
   assert rising.any() and not rising.all(), "the setpoint only went one way"
 
 
-def test_a_grasp_in_one_world_is_not_credited_to_its_neighbours() -> None:
+def test_a_grasp_in_one_world_is_not_credited_to_its_neighbors() -> None:
   """Contacts are per world, so only the grasping world reports a held cube."""
   env = PickPlaceEnv(PickPlaceCfg(max_steps=400), worlds=2)
   obs, info = env.reset(seeds=[0, 0])

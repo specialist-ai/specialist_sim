@@ -20,7 +20,7 @@ class ExpertCfg:
   across: tuple[float, float] = (0.15, 2.1)
   """How long a move takes: a fixed part plus a share of the distance. A longer
   reach is carried by speed rather than by time. The share is what a human's
-  moves take per metre; the fixed part is a fraction of theirs, because a cycle
+  moves take per meter; the fixed part is a fraction of theirs, because a cycle
   here is many stages and each one pays it."""
   speed: float = 0.70
   """The fastest a hand travels, whatever the time its distance asks for."""

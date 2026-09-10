@@ -26,7 +26,7 @@ from specialist_sim.action import slerp
 from specialist_sim.arrays import Float64Array
 from specialist_sim.env import PickPlaceEnv
 from specialist_sim.expert_cfg import ExpertCfg
-from specialist_sim.randomise import HOME_ROTATION, home
+from specialist_sim.randomize import HOME_ROTATION, home
 from specialist_sim.spaces import (
   FINGER_OPEN,
   FINGER_SHUT,
@@ -513,7 +513,7 @@ class Expert:
     """Where to hold the hand for the cube to come down on the tape.
 
     Across the table the hand moves by the error of the cube it holds, so a cube
-    sitting off-centre between the pads still lands on the tape. How high to
+    sitting off-center between the pads still lands on the tape. How high to
     hold it comes from the grasp instead: the cube rocks as the fingers close on
     it, and a height read off that moment would drive the hand into the table.
     """

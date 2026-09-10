@@ -10,7 +10,7 @@ from specialist_sim import PickPlaceCfg, PickPlaceEnv
 from specialist_sim.action import hold
 from specialist_sim.eval import LIFT, LIFTS, PROTOCOL, Outcome, against, summary, sweep
 from specialist_sim.observation import flat_rows
-from specialist_sim.randomise import Kicked, Region
+from specialist_sim.randomize import Kicked, Region
 from specialist_sim.spaces import GRIPPERS
 from specialist_sim.task import BIMANUAL, PlacedOnTape, Task, right_task
 

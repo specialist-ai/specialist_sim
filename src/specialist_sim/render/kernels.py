@@ -8,7 +8,7 @@ being carried into the world. Nothing is ever refit.
 import warp as wp
 
 REACH = 50.0
-"""How far a ray is followed, in metres."""
+"""How far a ray is followed, in meters."""
 
 SHADOW_BIAS = 1.0e-3
 """How far a shadow ray starts off its own surface, so a face cannot shade
