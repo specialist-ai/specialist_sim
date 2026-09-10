@@ -119,6 +119,30 @@ the lens's seat on the gripper base, so a caller holding a real calibration
 renders through it. The cameras are named for the slots the embodiment holds;
 left unset, every hand carries the nominal camera.
 
+## The room around it
+
+The camera sees world-anchored primitive geometry for the blue floor, the two
+walls bounding the work area, the tabletop and its center tape. Their diffuse
+maps add the carpet, painted-plaster and laminate surface detail visible in the
+capture room. Moving a wrist camera therefore produces parallax against every
+nearby surface. Rays that leave the measured patch read one flat background
+color, which is all a scene with no ceiling and no far wall owes them.
+
+The room frame is the measured capture frame: the midpoint of tag IDs 0 and 1
+is the origin, `+X` points toward the table, `+Y` toward the left wall, and `+Z`
+points up. AprilTags are excluded by default, since not every evaluation wants
+fiducials in its observations. Opt into both measured stands with:
+
+```python
+from specialist_sim.scene import SceneCfg
+
+env = PickPlaceEnv(PickPlaceCfg(scene=SceneCfg(apriltags=True)))
+```
+
+The tag centers are at `z=0`, one meter above the floor. Their exact
+`tagStandard41h12` patterns are assembled from black box primitives so the
+custom tracer and MuJoCo's renderer draw the same fiducials.
+
 ## Starting where you choose
 
 `reset` takes a state and a cube position, for an evaluation that repeats one

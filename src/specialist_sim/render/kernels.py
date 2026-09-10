@@ -3,6 +3,9 @@
 Every drawn geom is rigid, so its triangles live in a hierarchy built once in
 the geom's own frame; a ray is carried into that frame instead of the geometry
 being carried into the world. Nothing is ever refit.
+
+A ray that strikes nothing reads the neutral skybox instead. The lights shade
+the modeled room geoms, never that unfeatured background.
 """
 
 import warp as wp
@@ -60,6 +63,105 @@ def shadowed(
   return False
 
 
+@wp.func
+def sky(
+  faces: wp.array(dtype=wp.vec3),
+  axes: wp.array(dtype=wp.mat33),
+  size: int,
+  ray: wp.vec3,
+) -> wp.vec3:
+  """The far background along ``ray``, bilinearly.
+
+  The face is the axis the ray leans hardest along; ``axes`` carries that face's
+  center, columns and rows as the columns of a matrix, so the transpose turns a
+  ray into a depth and a texel. Samples clamp at a face's edge rather than
+  crossing into its neighbor, which shows as a seam only under magnification.
+  """
+  lean = wp.vec3(wp.abs(ray[0]), wp.abs(ray[1]), wp.abs(ray[2]))
+  face = int(0)
+  if lean[0] >= lean[1] and lean[0] >= lean[2]:
+    if ray[0] <= 0.0:
+      face = 1
+  elif lean[1] >= lean[2]:
+    face = 5
+    if ray[1] <= 0.0:
+      face = 4
+  else:
+    face = 2
+    if ray[2] <= 0.0:
+      face = 3
+
+  across = wp.transpose(axes[face]) * ray
+  half = 0.5 * float(size)
+  x = across[1] / across[0] * half + half - 0.5
+  y = across[2] / across[0] * half + half - 0.5
+  left = int(wp.floor(x))
+  top = int(wp.floor(y))
+  along = x - float(left)
+  down = y - float(top)
+
+  base = face * size * size
+  x0 = wp.clamp(left, 0, size - 1)
+  x1 = wp.clamp(left + 1, 0, size - 1)
+  y0 = wp.clamp(top, 0, size - 1) * size
+  y1 = wp.clamp(top + 1, 0, size - 1) * size
+  upper = faces[base + y0 + x0] * (1.0 - along) + faces[base + y0 + x1] * along
+  lower = faces[base + y1 + x0] * (1.0 - along) + faces[base + y1 + x1] * along
+  return upper * (1.0 - down) + lower * down
+
+
+@wp.func
+def textured(
+  pixels: wp.array(dtype=wp.vec3),
+  address: wp.array(dtype=wp.int32),
+  width: wp.array(dtype=wp.int32),
+  height: wp.array(dtype=wp.int32),
+  repeat: wp.array(dtype=wp.vec2),
+  half_size: wp.array(dtype=wp.vec3),
+  part: int,
+  point: wp.vec3,
+  normal: wp.vec3,
+  tint: wp.vec3,
+) -> wp.vec3:
+  """A box's diffuse texture at one local-space surface point, bilinearly."""
+  start = address[part]
+  if start < 0:
+    return tint
+
+  lean = wp.vec3(wp.abs(normal[0]), wp.abs(normal[1]), wp.abs(normal[2]))
+  u = float(0.0)
+  v = float(0.0)
+  if lean[2] >= lean[0] and lean[2] >= lean[1]:
+    u = point[0] / (2.0 * half_size[part][0]) + 0.5
+    v = point[1] / (2.0 * half_size[part][1]) + 0.5
+  elif lean[1] >= lean[0]:
+    u = point[0] / (2.0 * half_size[part][0]) + 0.5
+    v = point[2] / (2.0 * half_size[part][2]) + 0.5
+  else:
+    u = point[1] / (2.0 * half_size[part][1]) + 0.5
+    v = point[2] / (2.0 * half_size[part][2]) + 0.5
+  u = u * repeat[part][0]
+  v = v * repeat[part][1]
+  u = u - wp.floor(u)
+  v = v - wp.floor(v)
+
+  columns = width[part]
+  rows = height[part]
+  x = u * float(columns)
+  y = (1.0 - v) * float(rows)
+  left = int(wp.floor(x)) % columns
+  top = int(wp.floor(y)) % rows
+  right = (left + 1) % columns
+  bottom = (top + 1) % rows
+  along = x - wp.floor(x)
+  down = y - wp.floor(y)
+  upper = pixels[start + top * columns + left] * (1.0 - along)
+  upper += pixels[start + top * columns + right] * along
+  lower = pixels[start + bottom * columns + left] * (1.0 - along)
+  lower += pixels[start + bottom * columns + right] * along
+  return wp.cw_mul(tint, upper * (1.0 - down) + lower * down)
+
+
 @wp.kernel
 def trace(
   meshes: wp.array(dtype=wp.uint64),
@@ -71,12 +173,21 @@ def trace(
   bearings: wp.array(dtype=wp.vec3),
   pixel: wp.array(dtype=wp.int32),
   albedo: wp.array(dtype=wp.vec3),
+  texture: wp.array(dtype=wp.vec3),
+  texture_address: wp.array(dtype=wp.int32),
+  texture_width: wp.array(dtype=wp.int32),
+  texture_height: wp.array(dtype=wp.int32),
+  texture_repeat: wp.array(dtype=wp.vec2),
+  part_size: wp.array(dtype=wp.vec3),
   part_body: wp.array(dtype=wp.int32),
   key_dir: wp.vec3,
   key_diffuse: wp.vec3,
   fill_dir: wp.vec3,
   fill_diffuse: wp.vec3,
   ambient: wp.vec3,
+  faces: wp.array(dtype=wp.vec3),
+  axes: wp.array(dtype=wp.mat33),
+  size: int,
   image: wp.array(dtype=wp.uint8),
   body: wp.array(dtype=wp.int32),
 ):
@@ -85,13 +196,27 @@ def trace(
   struck, along, normal = nearest(meshes, position, rotation, seen, origin, ray, REACH)
   p = pixel[i]
   if struck < 0:
+    room = sky(faces, axes, size, ray)
     for channel in range(3):
-      image[p * 3 + channel] = wp.uint8(0)
+      image[p * 3 + channel] = wp.uint8(wp.clamp(room[channel], 0.0, 1.0) * 255.0 + 0.5)
     body[p] = -1
     return
   if wp.dot(normal, ray) > 0.0:
     normal = -normal
   point = origin + ray * along
+  to_part = wp.transpose(rotation[struck])
+  surface = textured(
+    texture,
+    texture_address,
+    texture_width,
+    texture_height,
+    texture_repeat,
+    part_size,
+    struck,
+    to_part * (point - position[struck]),
+    to_part * normal,
+    albedo[struck],
+  )
   light = ambient
   lambert = wp.dot(normal, -key_dir)
   if lambert > 0.0:
@@ -100,7 +225,7 @@ def trace(
   lambert = wp.dot(normal, -fill_dir)
   if lambert > 0.0:
     light += fill_diffuse * lambert
-  shade = wp.cw_mul(albedo[struck], light)
+  shade = wp.cw_mul(surface, light)
   for channel in range(3):
     image[p * 3 + channel] = wp.uint8(wp.clamp(shade[channel], 0.0, 1.0) * 255.0 + 0.5)
   body[p] = part_body[struck]

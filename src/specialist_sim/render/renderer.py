@@ -3,7 +3,8 @@
 Every drawn geom is rigid, so each one's triangles live in a hierarchy built
 once in its own frame; a frame's poses carry the rays instead of the geometry,
 and nothing is rebuilt or refit as the scene moves. The cameras share the parts
-and differ only in which they may see.
+and differ only in which they may see. The floor, walls, table and fiducials are
+geometry; only rays that leave that measured patch read a neutral background.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import warp as wp
 from specialist_sim.arrays import Int32Array, UInt8Array
 from specialist_sim.calibration import CameraCfg
 from specialist_sim.rays import build_rays
-from specialist_sim.render import kernels
+from specialist_sim.render import kernels, sky
 from specialist_sim.render.scene import gather
 
 __all__ = ["HOUSING", "Renderer", "View", "seat"]
@@ -85,9 +86,42 @@ class Renderer:
     self.albedo = wp.array(
       np.stack([part.albedo for part in self.parts]), dtype=wp.vec3
     )
+    texture_pixels = []
+    texture_address = []
+    texture_width = []
+    texture_height = []
+    for part in self.parts:
+      if part.texture is None:
+        texture_address.append(-1)
+        texture_width.append(0)
+        texture_height.append(0)
+        continue
+      texture_address.append(sum(len(pixels) for pixels in texture_pixels))
+      texture_height.append(part.texture.shape[0])
+      texture_width.append(part.texture.shape[1])
+      texture_pixels.append(part.texture.reshape(-1, 3))
+    packed = (
+      np.concatenate(texture_pixels, axis=0)
+      if texture_pixels
+      else np.zeros((1, 3), np.float32)
+    )
+    self.texture = wp.array(packed, dtype=wp.vec3)
+    self.texture_address = wp.array(np.asarray(texture_address), dtype=wp.int32)
+    self.texture_width = wp.array(np.asarray(texture_width), dtype=wp.int32)
+    self.texture_height = wp.array(np.asarray(texture_height), dtype=wp.int32)
+    self.texture_repeat = wp.array(
+      np.stack([part.repeat for part in self.parts]), dtype=wp.vec2
+    )
+    self.part_size = wp.array(
+      np.stack([part.size for part in self.parts]), dtype=wp.vec3
+    )
     self.part_body = wp.array(
       np.array([part.body for part in self.parts], np.int32), dtype=wp.int32
     )
+    faces = sky.read(model)
+    self.sky_size = int(faces.shape[1])
+    self.sky = wp.array(faces.reshape(-1, 3), dtype=wp.vec3)
+    self.sky_axes = wp.array(sky.AXES, dtype=wp.mat33)
     self.cameras = {
       name: _Camera(
         seat(model, name),
@@ -120,10 +154,19 @@ class Renderer:
           camera.bearings,
           camera.pixel,
           self.albedo,
+          self.texture,
+          self.texture_address,
+          self.texture_width,
+          self.texture_height,
+          self.texture_repeat,
+          self.part_size,
           self.part_body,
           *self._key,
           *self._fill,
           self._ambient,
+          self.sky,
+          self.sky_axes,
+          self.sky_size,
           camera.image,
           camera.body_hit,
         ],

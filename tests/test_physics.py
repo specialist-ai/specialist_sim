@@ -25,7 +25,7 @@ from specialist_sim.task import TaskCfg
 CLEARING = gripper_from_opening(0.4)
 """A finger angle that clears the cube."""
 
-NEAR = np.array([0.25, -0.55, -0.335])
+NEAR = np.array([0.25, -0.55, -0.260])
 FAR = np.array([0.85, 0.65, 0.25])
 """The corner to corner box these tests command inside, which is the table a
 hand reaches across and no lower than its top."""
@@ -195,7 +195,7 @@ def test_a_plan_turns_inside_one_control_step() -> None:
   assert rising.any() and not rising.all(), "the setpoint only went one way"
 
 
-def test_a_grasp_in_one_world_is_not_credited_to_its_neighbors() -> None:
+def test_a_grasp_in_one_world_is_not_credited_to_its_neighbours() -> None:
   """Contacts are per world, so only the grasping world reports a held cube."""
   env = PickPlaceEnv(PickPlaceCfg(max_steps=400), worlds=2)
   obs, info = env.reset(seeds=[0, 0])

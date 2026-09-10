@@ -35,7 +35,13 @@ __all__ = [
 class TaskCfg:
   """The thresholds the cube's report is judged against."""
 
-  place_tolerance: float = 0.010
+  place_tolerance: float = 0.016
+  """How far the cube's center may stand beyond the tape's half-width.
+
+  With the measured 10 mm tape and the 30 mm cube this allows one millimeter
+  beyond geometric overlap, and is still tighter than the former 31 x 26 mm
+  tape plus its 10 mm tolerance.
+  """
   rest_height: float = 0.005
   rest_speed: float = 0.02
   rest_spin: float = 0.5

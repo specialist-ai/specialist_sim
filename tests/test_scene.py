@@ -22,9 +22,35 @@ from specialist_sim.spaces import GRIPPERS, PER_HAND
 CARRIERS = [FloatingCfg(), GantryCfg()]
 IDS = ["floating", "gantry"]
 
+TAG_PATTERNS = {
+  0: (
+    "..#....##",
+    "#########",
+    ".#.....##",
+    "##.....#.",
+    "##.##..##",
+    "##.#.#.#.",
+    ".#.....##",
+    "#########",
+    "..#.##.##",
+  ),
+  1: (
+    "..#....#.",
+    "#########",
+    ".#.....##",
+    "##.....##",
+    ".#.#...#.",
+    ".#..#..##",
+    "##.....##",
+    ".#######.",
+    "#.#...##.",
+  ),
+}
+"""The reference tagStandard41h12 images for IDs 0 and 1, top to bottom."""
 
-def _scene(embodiment: EmbodimentCfg) -> Scene:
-  return Scene(SceneCfg(), embodiment.build())
+
+def _scene(embodiment: EmbodimentCfg, *, apriltags: bool = False) -> Scene:
+  return Scene(SceneCfg(apriltags=apriltags), embodiment.build())
 
 
 @pytest.mark.parametrize("embodiment", CARRIERS, ids=IDS)
@@ -39,6 +65,83 @@ def test_the_room_stands_up_the_hands_it_was_given(embodiment: EmbodimentCfg) ->
     )
   assert scene.cube.rest > scene.table_top
   assert len(scene.pads) > 0, "a grasp needs pads to touch with"
+
+
+def test_the_room_matches_the_measured_work_area() -> None:
+  scene = _scene(FloatingCfg(slots=("right_gripper",)))
+  model = scene.model
+  assert model.body("table").pos == pytest.approx([0.70, 0.0, -0.285])
+  assert 2.0 * model.geom("table").size == pytest.approx([0.60, 1.20, 0.05])
+  assert scene.table_top == pytest.approx(-0.26)
+  assert scene.tape == pytest.approx((0.70, 0.0))
+  assert 2.0 * model.geom("tape").size[:2] == pytest.approx([0.01, 0.01])
+
+  ground = model.body("ground").pos[2] + model.geom("ground").size[2]
+  left = model.body("wall_left").pos[1] - model.geom("wall_left").size[1]
+  far = model.body("wall_far").pos[0] - model.geom("wall_far").size[0]
+  assert ground == pytest.approx(-1.0)
+  assert left == pytest.approx(0.80)
+  assert far == pytest.approx(1.20)
+  for name in ("ground", "wall_left", "wall_far"):
+    assert model.geom(name).contype == 0 and model.geom(name).conaffinity == 0
+
+
+def test_the_room_uses_textures_on_its_large_surfaces() -> None:
+  model = _scene(FloatingCfg(slots=("right_gripper",))).model
+  for name in ("ground", "wall_left", "wall_far", "table"):
+    material = int(model.geom_matid[model.geom(name).id])
+    assert material >= 0
+    texture = model.mat_texid[material, mujoco.mjtTextureRole.mjTEXROLE_RGB]
+    assert texture >= 0
+    assert model.tex_type[texture] == mujoco.mjtTexture.mjTEXTURE_2D
+
+
+def test_apriltags_are_an_opt_in_room_addition() -> None:
+  without = _scene(FloatingCfg(slots=("right_gripper",))).model
+  with_tags = _scene(FloatingCfg(slots=("right_gripper",)), apriltags=True).model
+  for tag in (0, 1):
+    assert mujoco.mj_name2id(without, mujoco.mjtObj.mjOBJ_BODY, f"tag_{tag}") == -1
+    assert mujoco.mj_name2id(with_tags, mujoco.mjtObj.mjOBJ_BODY, f"tag_{tag}") >= 0
+
+
+def test_the_anchor_tags_hold_the_measured_poses() -> None:
+  scene = _scene(FloatingCfg(slots=("right_gripper",)), apriltags=True)
+  model, data = scene.model, scene.data
+  mujoco.mj_forward(model, data)
+  for tag, (position, facing) in {
+    0: ((0.0, 0.5633, 0.0), (1.0, -1.0, 0.0)),
+    1: ((0.0, -0.5633, 0.0), (1.0, 1.0, 0.0)),
+  }.items():
+    body = model.body(f"tag_{tag}")
+    assert body.pos == pytest.approx(position)
+    out = data.xmat[body.id].reshape(3, 3)[:, 2]
+    assert out == pytest.approx(np.asarray(facing) / np.sqrt(2.0), abs=1e-9)
+
+
+@pytest.mark.parametrize("tag", [0, 1])
+def test_the_anchor_tag_ink_is_the_reference_pattern(tag: int) -> None:
+  scene = _scene(FloatingCfg(slots=("right_gripper",)), apriltags=True)
+  model = scene.model
+  ink = [
+    geom
+    for geom in range(model.ngeom)
+    if (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom) or "").startswith(
+      f"tag_{tag}_ink_"
+    )
+  ]
+  cell = 0.10 / 9.0
+  observed = []
+  for row in range(9):
+    line = ""
+    for column in range(9):
+      point = np.array([(column - 4) * cell, (4 - row) * cell])
+      black = any(
+        np.all(np.abs(point - model.geom_pos[geom, :2]) <= model.geom_size[geom, :2])
+        for geom in ink
+      )
+      line += "#" if black else "."
+    observed.append(line)
+  assert tuple(observed) == TAG_PATTERNS[tag]
 
 
 def test_a_rig_of_one_hand_holds_only_that_slot() -> None:
