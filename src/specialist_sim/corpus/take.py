@@ -188,11 +188,28 @@ def _steps(seen: Recording) -> Int64Array:
   return lattices[0]
 
 
+LEGACY_ROW = "step"
+"""What the row timeline was called before the schema renamed it.
+
+Every capture solved up to 2026-09-10 carries this name, and there are far more
+of those on disk than there are datasets written since, so a take reads either.
+"""
+
+
 def _lattice(seen: Recording, entity: str) -> Int64Array:
-  """One entity's step index, the integer row of the state stream."""
-  column = seen.series(f"/{entity}").column(schema.ROW_TIMELINE)
-  out: Int64Array = np.asarray(column.combine_chunks().to_pylist(), np.int64)
-  return out
+  """One entity's row index on the state stream's lattice."""
+  series = seen.series(f"/{entity}")
+  for timeline in (schema.ROW_TIMELINE, LEGACY_ROW):
+    try:
+      column = series.column(timeline)
+    except KeyError:
+      continue
+    out: Int64Array = np.asarray(column.combine_chunks().to_pylist(), np.int64)
+    return out
+  raise ValueError(
+    f"{seen.path}: /{entity} carries neither a "
+    f"{schema.ROW_TIMELINE!r} nor a {LEGACY_ROW!r} timeline"
+  )
 
 
 def _slot(seen: Recording, hand: str) -> str:
