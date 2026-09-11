@@ -122,10 +122,10 @@ left unset, every hand carries the nominal camera.
 ## The room around it
 
 The camera sees world-anchored primitive geometry for the blue floor, the two
-walls bounding the work area, the tabletop and its center tape. Their diffuse
-maps add the carpet, painted-plaster and laminate surface detail visible in the
-capture room. Moving a wrist camera therefore produces parallax against every
-nearby surface. Rays that leave the measured patch read one flat background
+walls bounding the work area, the tabletop and its center tape. Moving a wrist
+camera therefore produces parallax against every nearby surface. Each surface
+carries a diffuse map, but those maps are near-flat swatches -- all three span
+about twelve grey levels -- so they set a color, not a grain. Rays that leave the measured patch read one flat background
 color, which is all a scene with no ceiling and no far wall owes them.
 
 The room frame is the measured capture frame: the midpoint of tag IDs 0 and 1
