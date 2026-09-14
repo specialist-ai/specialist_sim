@@ -8,10 +8,15 @@ requires-python = ">=3.14"
 dependencies = [
   "numpy",
   "mujoco>=3.17",
+  "warp-lang>=1.16",
+  "specialist-description",
 ]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]
+
+[tool.uv.sources]
+specialist-description = { git = "ssh://git@github.com/specialist-ai/specialist_description.git", branch = "main" }
 
 [build-system]
 requires = ["hatchling"]
@@ -30,13 +35,22 @@ indent-width = 2
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B"]
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["specialist_sim.env.Cfg"]
+
 [tool.mypy]
 python_version = "3.14"
 strict = true
 files = ["src/specialist_sim", "tests"]
 mypy_path = ["src", "tests"]
 explicit_package_bases = true
+# warp's array and kernel annotations are not Python types.
+exclude = ["src/specialist_sim/camera/kernels.py", "src/specialist_sim/camera/render.py"]
 
 [[tool.mypy.overrides]]
-module = ["mujoco", "mujoco.*"]
+module = ["mujoco", "mujoco.*", "warp", "warp.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["specialist_sim.camera.kernels", "specialist_sim.camera.render"]
+follow_imports = "skip"

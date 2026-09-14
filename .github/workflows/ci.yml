@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
@@ -35,6 +38,9 @@ jobs:
       UV_FROZEN: "0"
     steps:
       - uses: actions/checkout@v7
+      - uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
@@ -46,6 +52,25 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      # Each deploy key, mapped to the repository its comment names, for this
+      # job alone: the runner's home outlives the job.
+      - env:
+          KEYS: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          cd "$RUNNER_TEMP"
+          awk '/BEGIN/ { f = "key" ++n } f { print > f }' <<< "$KEYS"
+          n=0
+          for key in key*; do
+            chmod 600 "$key"
+            repo=$(ssh-keygen -y -f "$key" | grep -o 'specialist-ai/[^ ]*' | sed 's/\.git$//')
+            printf 'Host %s\n  HostName github.com\n  IdentityFile %s\n  IdentitiesOnly yes\n' \
+              "$key" "$PWD/$key" >> ssh_config
+            echo "GIT_CONFIG_KEY_$n=url.git@$key:$repo.git.insteadOf" >> "$GITHUB_ENV"
+            echo "GIT_CONFIG_VALUE_$n=ssh://git@github.com/$repo.git" >> "$GITHUB_ENV"
+            n=$((n + 1))
+          done
+          echo "GIT_CONFIG_COUNT=$n" >> "$GITHUB_ENV"
+          echo "GIT_SSH_COMMAND=ssh -F $PWD/ssh_config" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.7"
