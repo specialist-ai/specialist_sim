@@ -12,8 +12,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# A recorded dataset: an episode written out as one.
-dataset = ["rerun-sdk>=0.36", "specialist-corpus", "av>=13"]
+# A recorded dataset: a session replayed into the environment, and an episode
+# written out as one.
+dataset = ["rerun-sdk>=0.36", "specialist-corpus", "av>=13", "imageio-ffmpeg>=0.5"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]
@@ -49,7 +50,7 @@ explicit_package_bases = true
 exclude = ["src/specialist_sim/kernels.py", "src/specialist_sim/render.py"]
 
 [[tool.mypy.overrides]]
-module = ["mujoco", "mujoco.*", "warp", "warp.*", "rerun", "rerun.*"]
+module = ["mujoco", "mujoco.*", "warp", "warp.*", "rerun", "rerun.*", "imageio_ffmpeg"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

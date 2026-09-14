@@ -169,3 +169,14 @@ trainer reads exactly as it reads a capture:
 uv run --extra dataset python scripts/synthesize.py --dataset ~/corpus_sim --episodes 20
 ```
 
+## Replaying a recorded take
+
+The `dataset` extra also reads a solved session and drives the scene from it,
+drawing each simulated view over the footage it came from with every body
+outlined:
+
+```
+uv run --extra dataset python scripts/replay.py \
+  --dataset ~/corpus --session canon002 --output overlay.mp4
+```
+
