@@ -2,7 +2,7 @@
 
 A simulated capture rig for collecting demonstrations and evaluating
 manipulation policies: grippers on their embodiment, standing in whatever scene
-an env puts them in. Any policy is scored on one evaluation.
+an env puts them in. One env comes with it, pick-and-place.
 
 ## Setup
 
@@ -128,6 +128,14 @@ Cfg(scene=..., cameras={"right_gripper": measured})
 
 ## The env and its task
 
+```python
+from specialist_sim.env import Cfg, Env
+from specialist_sim.pickplace import PickPlace
+
+env = Env(PickPlace(), Cfg(driven=("right_gripper",)), num_envs=8)
+observation, report = env.reset(range(8))
+```
+
 One `Env` stands every scene. It owns the rig and the latches every task
 shares: a goal held for `Task.dwell` steps latches `success`, which pays one
 `reward`, and `done` is success, the task's own loss, or an env MuJoCo could
@@ -143,9 +151,9 @@ what an episode calls the scene, and `Task.focus` the room point an overview of
 it looks at. `env.task` is the task itself, so a scene's own reading is reached
 through it.
 
-A task's knobs are the task's own, and `Cfg` carries only what any scene runs
-under. A task names the `Cfg` it expects by default, which `Env` uses when it
-is given none.
+A task's knobs are the task's own, `PickPlace(region=...)`, and `Cfg` carries
+only what any scene runs under. A task names the `Cfg` it expects by default,
+which `Env` uses when it is given none.
 
 ## Physics
 
@@ -167,6 +175,36 @@ and those rates beside everything they were produced under: the task and its
 knobs, the configuration, and a `revision` that hashes the gripper, the task,
 what it ran under, the physics engine and the files under the task's `assets`.
 
+## The pick-and-place task
+
+```python
+from specialist_sim.env import Env
+from specialist_sim.pickplace import PickPlace
+from specialist_sim.action import hold
+
+env = Env(PickPlace())
+observation, report = env.reset([0])
+observation, report = env.step(hold(observation.state[:, -1]))
+```
+
+Two hands stand at the desk with a tape target on its middle and a cube. The
+cube starts clear of the tape, within `PickPlace.region` of it, and the episode
+is won when it rests on the tape, let go of.
+
+`report.labels` carries what the task counts of every env's cube (`on_tape`,
+`held`, `dropped`, `picked`) beside how the episode stands (`progress`,
+`success`, `unstable`, `tracking_error`, `reward`, `done`). The reward is one
+on the step the cube has settled on the tape for five steps, so an undiscounted
+return is the success indicator.
+
+`Cfg.driven` names the hands a policy commands, both or one of them, and
+`Cfg.seen` any lens the observation carries beyond their own. A start of your
+own repeats an episode exactly:
+
+```python
+env.reset([0], start=(hands, cube))   # hands (2, 8); cube (x, y, yaw)
+```
+
 ## Layout
 
 ```
@@ -178,5 +216,6 @@ src/specialist_sim/
   action.py         action chunks, and the Interpolator the embodiment chases
   camera.py         the MEI fisheye, which render.py and kernels.py trace on the GPU
   eval.py           Policy, eval_policy, summary, mcnemar
+  pickplace/        the pick-and-place task: room, task
 tests/
 ```
