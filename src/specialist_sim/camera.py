@@ -128,6 +128,9 @@ class Camera:
   mask: float | None = 0.5
   """How much of the frame it keeps, as a radius from the center over the
   width; ``None`` keeps the whole frame."""
+  hz: float = 30000.0 / 1001.0
+  """How fast it fires, on a clock of its own; an episode draws where in its
+  period it stands."""
 
   def rays(self, size: int) -> Rays:
     """Every pixel's bearing at ``size`` pixels across. A pixel earns a ray by
