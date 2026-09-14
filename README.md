@@ -110,3 +110,11 @@ them mean. `bench.summary` reports those rates beside everything they were
 produced under, including a `revision` that hashes the gripper, the
 configuration, the physics engine and the files under the scene's `assets`.
 
+## Demonstrations
+
+`expert.Expert` carries out a `Script`: stages that each move one hand along a
+minimum-jerk curve to a goal the script names, work the fingers over a window
+of the move, turn the wrist on the way, and hand their speed to the next. Every
+goal is read off the world when a stage begins, and a stage ends when the
+plant has answered, not when its move has. A scene supplies the script.
+
