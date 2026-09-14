@@ -180,3 +180,8 @@ uv run --extra dataset python scripts/replay.py \
   --dataset ~/corpus --session canon002 --output overlay.mp4
 ```
 
+## Start regions from a dataset
+
+`dataset.region` derives the region a policy's picks begin in from the dataset
+it was trained on: the convex ring around every closing of the fingers on the
+cube, less the disc around the tape those closings keep clear of.

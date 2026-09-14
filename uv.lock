@@ -541,6 +541,10 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+catalog = [
+    { name = "datafusion" },
+    { name = "pandas" },
+]
 datafusion = [
     { name = "datafusion" },
     { name = "pandas" },
@@ -621,7 +625,7 @@ dependencies = [
 dataset = [
     { name = "av" },
     { name = "imageio-ffmpeg" },
-    { name = "rerun-sdk" },
+    { name = "rerun-sdk", extra = ["catalog"] },
     { name = "specialist-corpus" },
 ]
 
@@ -639,7 +643,7 @@ requires-dist = [
     { name = "imageio-ffmpeg", marker = "extra == 'dataset'", specifier = ">=0.5" },
     { name = "mujoco", specifier = ">=3.12" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "rerun-sdk", marker = "extra == 'dataset'", specifier = ">=0.36" },
+    { name = "rerun-sdk", extras = ["catalog"], marker = "extra == 'dataset'", specifier = ">=0.36" },
     { name = "specialist-corpus", marker = "extra == 'dataset'", git = "ssh://git@github.com/specialist-ai/specialist.git?subdirectory=packages%2Fspecialist_corpus&branch=main" },
     { name = "specialist-description", git = "ssh://git@github.com/specialist-ai/specialist_description.git?branch=main" },
     { name = "warp-lang", specifier = ">=1.16" },
