@@ -1,7 +1,8 @@
 # specialist_sim
 
 A simulated capture rig for evaluating manipulation policies: grippers on
-their embodiment, in whatever room a task gives them.
+their embodiment, in whatever room a task gives them. Pick-and-place comes
+with it.
 
 ## Setup
 
@@ -26,6 +27,15 @@ across, black outside its disc. Each pixel averages `Cfg.supersample` by
 `Cfg.supersample` rays; the default 2 is the robot's 720 px frame halved.
 
 ## The env
+
+```python
+from specialist_sim.env import Cfg, Env, hold
+from specialist_sim.tasks.pick_place import PickPlace
+
+env = Env(PickPlace(), Cfg(driven=("right",)), num_envs=8)
+observation, info = env.reset(range(8))
+observation, info = env.step(hold(observation.state[:, -1], 16))
+```
 
 A hand is eight numbers: its base tag's position in the room, a `wxyz`
 quaternion, and its opening, the right finger's angle negated, as the servo
@@ -120,6 +130,21 @@ source. A rollout is deterministic: the same seeds give the same outcomes.
 stood (`state`), the setpoints they chased (`setpoint`) and `qpos`, and a JSON
 `meta` that `env.make` stands the env again from. No image is
 stored. `episode.joined` puts an episode's steps end to end.
+
+## The pick-and-place task
+
+```python
+from specialist_sim.env import Env, Start
+from specialist_sim.tasks.pick_place import PickPlace
+
+env = Env(PickPlace())
+observation, info = env.reset([0])
+env.reset([0], start=Start(hands, cube))   # hands (2, 8); cube (1, 7)
+```
+
+A cube starts off a tape target on the desk and is won when it rests on the
+tape, let go of, for half a second. `info["labels"]` carries `picked`, latched,
+and `dropped`, which ends the episode.
 
 ## Replaying a recorded take
 
