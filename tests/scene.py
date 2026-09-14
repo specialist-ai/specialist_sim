@@ -6,7 +6,7 @@ import mujoco
 SLAB = """
 <mujoco>
   <worldbody>
-    <geom name="slab" type="box" pos="0.5 0 -0.5" size="1 1 0.02" rgba="0.8 0.8 0.75 1"/>
+    <geom name="slab" type="box" pos="0.5 0 -0.5" size="1 1 0.02" group="1" rgba="0.8 0.8 0.75 1"/>
   </worldbody>
 </mujoco>
 """
