@@ -2,7 +2,7 @@
 
 A simulated capture rig for collecting demonstrations and evaluating
 manipulation policies: grippers on their embodiment, standing in whatever scene
-an env puts them in, stepped many envs at a time.
+an env puts them in. Any policy is scored on one evaluation.
 
 ## Setup
 
@@ -126,6 +126,27 @@ from specialist_sim.camera import Camera
 Cfg(scene=..., cameras={"right_gripper": measured})
 ```
 
+## The env and its task
+
+One `Env` stands every scene. It owns the rig and the latches every task
+shares: a goal held for `Task.dwell` steps latches `success`, which pays one
+`reward`, and `done` is success, the task's own loss, or an env MuJoCo could
+not carry. A label the task names in `Task.latched` is held once it is true, so
+its rate reads as "this happened", not "this was true at the end".
+
+A `Task` says what the rest is. `spec` builds the scene, `bind` reads what
+judging needs out of the compiled model, `open` lays one env's episode from its
+seed and says where each lens stands in its period, and `judge` returns a
+`Verdict`: how far every env has come, whether its goal holds, whether it is
+lost, and whatever else the task counts under its own names. `Task.name` is
+what an episode calls the scene, and `Task.focus` the room point an overview of
+it looks at. `env.task` is the task itself, so a scene's own reading is reached
+through it.
+
+A task's knobs are the task's own, and `Cfg` carries only what any scene runs
+under. A task names the `Cfg` it expects by default, which `Env` uses when it
+is given none.
+
 ## Physics
 
 Every solver and contact setting is one value, `physics.Physics`, which the rig
@@ -135,14 +156,27 @@ an `implicitfast` integrator, an elliptic friction cone at an impedance ratio
 of 100, a 2 ms contact time constant with the gripping pads taking priority,
 and object damping near zero.
 
+## Evaluation
+
+`eval.eval_policy` runs one episode per seed on a `Policy` through an `Env`
+standing any task, keeping every env busy: an env whose episode ends restarts
+alone on the next seed. A task counts whatever it likes under its own names,
+in `report.labels`, and an outcome carries them. Evaluation rates each one
+without knowing what any of them mean. `eval.summary` reports the success rate
+and those rates beside everything they were produced under: the task and its
+knobs, the configuration, and a `revision` that hashes the gripper, the task,
+what it ran under, the physics engine and the files under the task's `assets`.
+
 ## Layout
 
 ```
 src/specialist_sim/
+  env.py            the Env every task is stood in, and the Task interface
   rig.py            the hands on their embodiment in num_envs envs, and the Clock
   gripper.py        the described gripper, its base, its pads
   embodiment.py     what holds the hands up: Floating
   action.py         action chunks, and the Interpolator the embodiment chases
   camera.py         the MEI fisheye, which render.py and kernels.py trace on the GPU
+  eval.py           Policy, eval_policy, summary, mcnemar
 tests/
 ```
