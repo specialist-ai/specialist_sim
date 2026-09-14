@@ -12,11 +12,19 @@ dependencies = [
   "specialist-description",
 ]
 
+[project.optional-dependencies]
+# A recorded session, read back and replayed into the environment.
+dataset = ["specialist-dataset", "av>=13"]
+
+[project.scripts]
+sim-replay = "specialist_sim.scripts.replay:main"
+
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]
 
 [tool.uv.sources]
 specialist-description = { git = "ssh://git@github.com/specialist-ai/specialist_description.git", branch = "main" }
+specialist-dataset = { git = "ssh://git@github.com/specialist-ai/specialist.git", subdirectory = "packages/specialist_dataset", branch = "main" }
 
 [build-system]
 requires = ["hatchling"]

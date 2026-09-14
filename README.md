@@ -9,9 +9,11 @@ You need Python 3.14, MuJoCo 3.17 or later, and a CUDA GPU for the lenses.
 An env without lenses runs on the CPU.
 
 ```bash
-uv sync
+uv sync --all-extras
 uv run pytest
 ```
+
+The `dataset` extra adds the take replay and PyAV, which films a replay.
 
 ## The lenses
 
@@ -118,3 +120,15 @@ source. A rollout is deterministic: the same seeds give the same outcomes.
 stood (`state`), the setpoints they chased (`setpoint`) and `qpos`, and a JSON
 `meta` that `env.make` stands the env again from. No image is
 stored. `episode.joined` puts an episode's steps end to end.
+
+## Replaying a recorded take
+
+With the `dataset` extra, `take.Take` reads a solved session and drives the
+hands of an empty room from it. `sim-replay` films each simulated view over the
+footage it came from and prints how closely the hands tracked the solve:
+
+```bash
+uv run --extra dataset sim-replay \
+  --dataset ~/dataset_0903 --session 20260903_030121_IAQEB2601UVVAJ \
+  --layer state_s12_r100 --out overlay.mp4
+```
