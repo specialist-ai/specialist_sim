@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # The description package is private: the key in the secret reaches it.
+      # The description and dataset packages are private: the keys reach them.
       - uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -28,9 +28,9 @@ jobs:
         with:
           enable-cache: true
           version: "0.13.7"
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run mypy
+      - run: uv run --all-extras ruff format --check .
+      - run: uv run --all-extras ruff check .
+      - run: uv run --all-extras mypy
 
   # The newest releases every bound admits, resolved afresh, so a release
   # upstream breaks a pull request rather than a run on main.
@@ -47,4 +47,4 @@ jobs:
         with:
           enable-cache: true
           version: "0.13.7"
-      - run: uv run --upgrade mypy
+      - run: uv run --upgrade --all-extras mypy

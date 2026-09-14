@@ -3,7 +3,8 @@
 A simulated capture rig for collecting demonstrations and evaluating
 manipulation policies: grippers on their embodiment, standing in whatever scene
 an env puts them in. Two tasks come with it, LEGO sorting and
-pick-and-place.
+pick-and-place. A recorded session replays through it, drawn over the
+footage it came from.
 
 ## Setup
 
@@ -11,9 +12,11 @@ You need Python 3.12 and a CUDA GPU for the lenses, which Warp traces. A rig
 with its lenses off runs on the CPU alone.
 
 ```bash
-uv sync
+uv sync --all-extras
 uv run pytest
 ```
+
+The `dataset` extra adds the take replay.
 
 ## The lenses
 
@@ -252,6 +255,17 @@ own repeats an episode exactly:
 env.reset([0], start=(hands, cube))   # hands (2, 8); cube (x, y, yaw)
 ```
 
+## Replaying a recorded take
+
+With the `dataset` extra, `take.Take` reads a solved session and drives the rig
+from it, drawing each simulated view over the footage it came from with every
+body outlined:
+
+```bash
+uv run --extra dataset python scripts/replay.py \
+  --dataset ~/dataset --session canon002 --output overlay.mp4
+```
+
 ## Layout
 
 ```
@@ -266,5 +280,7 @@ src/specialist_sim/
   eval.py           Policy, eval_policy, summary, mcnemar
   sort_lego/        the LEGO sorting task: scene, assets, initial, task
   pickplace/        the pick-and-place task: room, task
+  take.py           Take, a recorded session read back to drive the rig (dataset extra)
+scripts/            replay
 tests/
 ```
