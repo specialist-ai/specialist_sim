@@ -99,3 +99,14 @@ from specialist_sim.camera import Camera
 Cfg(world=..., cameras={"right_gripper": measured})
 ```
 
+## The benchmark
+
+`bench.sweep` runs one episode per seed on an `Agent` through any scene that
+offers `reset` and `step` returning an observation and a report with
+`success`, `done`, `broke` and `tracking`, keeping every world busy. A scene
+counts whatever else it likes under its own names, in `report.labels`, and an
+outcome carries them; the bench rates each one without knowing what any of
+them mean. `bench.summary` reports those rates beside everything they were
+produced under, including a `revision` that hashes the gripper, the
+configuration, the physics engine and the files under the scene's `assets`.
+
