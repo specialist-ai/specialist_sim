@@ -1,0 +1,42 @@
+[project]
+name = "specialist-sim"
+version = "1.0.0"
+description = "A simulated capture rig for evaluating manipulation policies"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.14"
+dependencies = [
+  "numpy",
+  "mujoco>=3.17",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/specialist_sim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src", "tests"]
+indent-width = 2
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src/specialist_sim", "tests"]
+mypy_path = ["src", "tests"]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["mujoco", "mujoco.*"]
+ignore_missing_imports = true

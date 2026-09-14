@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+  UV_PYTHON: "3.14"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          version: "0.13.7"
+      - run: uv run --all-extras ruff format --check .
+      - run: uv run --all-extras ruff check .
+      - run: uv run --all-extras mypy
+
+  unlocked:
+    runs-on: ubuntu-latest
+    env:
+      UV_FROZEN: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          version: "0.13.7"
+      - run: uv run --upgrade --all-extras mypy
+
+  tests:
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.7"
+      - run: uv run --all-extras pytest
