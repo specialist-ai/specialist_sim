@@ -118,3 +118,45 @@ of the move, turn the wrist on the way, and hand their speed to the next. Every
 goal is read off the world when a stage begins, and a stage ends when the
 plant has answered, not when its move has. A scene supplies the script.
 
+## The pick-and-place scene
+
+```python
+from specialist_sim.pickplace import Cfg, PickPlace
+from specialist_sim.trajectory import hold
+
+env = PickPlace()
+observation, report = env.reset([0])
+observation, report = env.step(hold(observation.state[:, -1]))
+```
+
+Two hands stand at a table with a tape target and a cube, in the room the
+recordings were made in: the two tag stands' midpoint is the origin, the
+tabletop starts 0.40 m past the tag line, and the floor, walls and tabletop
+carry the diffuse maps of the room's carpet, plaster and laminate.
+`Cfg(fiducials=True)` stands the tag stands in it, their `tagStandard41h12`
+patterns laid as boxes.
+
+`report` says what every world's cube is doing (`cube`, `on_tape`, `resting`,
+`held`, `dropped`, `displaced`, `picked`) and how the episode stands (`success`,
+`broke`, `tracking`, `reward`, `done`). The reward is one on the step the cube
+has settled on the tape for five steps, having been off it, so an undiscounted
+return is the success indicator.
+
+`Task` names the hands a policy drives, where an episode opens, what the cube
+must do for it to be won, and any lens the observation carries beyond the
+driven hands' own. `BIMANUAL` drives both hands from the tape until the cube
+is put back on it; `right_task(region)` drives the right hand from a cube
+kicked into `region`; `left_task(region)` drives the left until the cube rests
+in `region`. A region is a convex ring less a disc. A `Start` of your own
+repeats an episode exactly:
+
+```python
+from specialist_sim.pickplace.task import Fixed
+
+env.reset([0], start=Fixed(hands, cube))   # hands (2, 8); cube (x, y, yaw)
+```
+
+`pickplace.script.expert(env, rng)` is the scene's demonstrator: one hand
+kicks the cube off the tape and the other picks it up and puts it back, over
+and over, its style measured off the human recordings.
+
