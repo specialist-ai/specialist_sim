@@ -160,3 +160,12 @@ env.reset([0], start=Fixed(hands, cube))   # hands (2, 8); cube (x, y, yaw)
 kicks the cube off the tape and the other picks it up and puts it back, over
 and over, its style measured off the human recordings.
 
+## Writing episodes as a dataset
+
+With the `dataset` extra, a demonstration is written as a state layer a
+trainer reads exactly as it reads a capture:
+
+```
+uv run --extra dataset python scripts/synthesize.py --dataset ~/corpus_sim --episodes 20
+```
+
