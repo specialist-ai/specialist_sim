@@ -7,6 +7,7 @@ license = {text = "MIT"}
 dependencies = [
   "numpy>=1.26",
   "mujoco>=3.12",
+  "warp-lang>=1.16",
   "specialist-description",
 ]
 
@@ -39,7 +40,13 @@ strict = true
 files = ["src/specialist_sim", "tests"]
 mypy_path = ["src", "tests"]
 explicit_package_bases = true
+# warp's array and kernel annotations are not Python types.
+exclude = ["src/specialist_sim/kernels.py", "src/specialist_sim/render.py"]
 
 [[tool.mypy.overrides]]
-module = ["mujoco", "mujoco.*"]
+module = ["mujoco", "mujoco.*", "warp", "warp.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["specialist_sim.kernels", "specialist_sim.render"]
+follow_imports = "skip"
