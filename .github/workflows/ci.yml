@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The description package is private: the key in the secret reaches it.
+      - uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          version: "0.13.7"
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+
+  # The newest releases every bound admits, resolved afresh, so a release
+  # upstream breaks a pull request rather than a run on main.
+  unlocked:
+    runs-on: ubuntu-latest
+    env:
+      UV_FROZEN: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          version: "0.13.7"
+      - run: uv run --upgrade mypy
