@@ -80,13 +80,13 @@ def test_a_beginning_reports_the_hands_and_every_camera(embodiment: Embodiment) 
   assert (observation.state[0] == observation.state[0, -1]).all()
   assert observation.state[0, -1, :, :3] == pytest.approx(HOME[:, :3], abs=1e-6)
   assert (
-    observation.image.shape == (1, 2, size, size, 3)
+    observation.image.shape == (1, 2, 1, size, size, 3)
     and observation.image.dtype == np.uint8
   )
-  assert observation.body.shape == (1, 2, size, size)
-  assert observation.image_row.tolist() == [[0, 0]]
+  assert observation.body.shape == (1, 2, 1, size, size)
+  assert observation.image_row.tolist() == [[[0], [0]]]
   assert not rig.unstable[0] and rig.tracking_error[0] < 1e-9
-  assert (observation.image[0, 0].sum(axis=2) > 0).mean() > 0.2
+  assert (observation.image[0, 0, -1].sum(axis=2) > 0).mean() > 0.2
   assert not np.array_equal(observation.image[0, 0], observation.image[0, 1])
 
 
@@ -180,7 +180,7 @@ def test_a_step_reports_the_rows_it_spanned() -> None:
     assert observation.row[0].tolist() == list(
       range((step - 1) * rows + 1, step * rows + 1)
     )
-    age = step * rows - int(observation.image_row[0, 0])
+    age = step * rows - int(observation.image_row[0, 0, -1])
     assert 0 <= age <= SPAN
 
 
@@ -200,8 +200,8 @@ def _delivered(
   for _ in range(steps):
     observation = rig.step(action)
     qpos.append(rig.datas[0].qpos.copy())
-    taken.append(int(observation.image_row[0, 0]))
-    seen[int(observation.image_row[0, 0])] = observation.image[0, 0].copy()
+    taken.append(int(observation.image_row[0, 0, -1]))
+    seen[int(observation.image_row[0, 0, -1])] = observation.image[0, 0, -1].copy()
     for frame in rig.exposed[0][SLOTS[0]]:
       shot[frame.row] = frame.image.copy()
   return seen, shot, np.asarray(qpos), taken
@@ -238,7 +238,7 @@ def test_an_episode_opens_with_a_camera_that_was_already_running() -> None:
   for latency in (0.0, 0.03, 0.15, 0.17):
     rig = Rig(replace(SMALL, camera_latency=latency))
     observation = _begin(rig)
-    age = -int(observation.image_row[0, 0]) - latency / Clock().row_dt
+    age = -int(observation.image_row[0, 0, -1]) - latency / Clock().row_dt
     assert -0.5 <= age <= SPAN + 0.5
 
 
@@ -250,16 +250,15 @@ def test_a_lens_fires_on_its_own_clock() -> None:
   rig = Rig(SMALL)
   observation = _begin(rig)
   drawn = 0
-  rendering = rig._renderer.render
+  assert rig._renderer is not None
+  rendering = rig._renderer.render_many
 
-  def counted(
-    data: mujoco.MjData, names: Any = None, rendering: Any = rendering
-  ) -> Any:
+  def counted(datas: Any, names: Any, rendering: Any = rendering) -> Any:
     nonlocal drawn
-    drawn += 1
-    return rendering(data, names)
+    drawn += len(datas) * len(names)
+    return rendering(datas, names)
 
-  rig._renderer.render = counted
+  rig._renderer.render_many = counted
   rows: list[int] = []
   for _ in range(12):
     observation = rig.step(hold(observation.state[0, -1])[None])
@@ -312,7 +311,7 @@ def test_one_env_restarts_while_the_others_carry_on(embodiment: Embodiment) -> N
   observation = rig.begin([1])
   assert observation.row[1, -1] == 0, "the restarted env keeps counting"
   assert observation.row[0, -1] == 3 * rows, "the others were restarted with it"
-  assert observation.image_row[:, 0].tolist() == [3 * rows, 0, 3 * rows]
+  assert observation.image_row[:, 0, -1].tolist() == [3 * rows, 0, 3 * rows]
   assert np.array_equal(observation.state[[0, 2], -1], carried)
 
   observation = rig.step(hold(observation.state[:, -1]))
@@ -377,3 +376,42 @@ def test_the_rig_runs_under_the_physics_it_is_given() -> None:
   assert model.dof_damping[rig_dof] == Floating().damping, (
     "an embodiment keeps its own damping"
   )
+
+
+def test_tracing_only_the_delivered_exposures_delivers_the_same_frames() -> None:
+  """Off for a recorder, the rig traces an exposure only if an observation
+  will hand it over, which changes nothing the policy sees."""
+  for latency in (0.0, 0.07):
+    every = Rig(replace(SMALL, camera_latency=latency, frames=2))
+    lazy = Rig(replace(SMALL, camera_latency=latency, frames=2, record=False))
+    seen = [_begin(every), _begin(lazy)]
+    traced = 0
+    for _ in range(8):
+      action = hold(seen[0].state[0, -1])[None]
+      action[..., 0, 2] += 0.04
+      seen = [every.step(action), lazy.step(action)]
+      assert np.array_equal(seen[0].image_row, seen[1].image_row)
+      assert np.array_equal(seen[0].image, seen[1].image)
+      traced += sum(len(frames) for frames in every.exposed[0].values())
+      assert not any(lazy.exposed[0].values()), "nothing is kept for a recorder"
+    assert traced > 2 * 2 * 8, "every exposure was traced for the recorder"
+
+
+def test_an_observation_carries_each_lens_newest_frames() -> None:
+  rig = Rig(replace(SMALL, frames=3))
+  observation = _begin(rig)
+  for _ in range(4):
+    observation = rig.step(hold(observation.state[0, -1])[None])
+    rows = observation.image_row[0, 0]
+    assert observation.image.shape[2] == 3
+    assert (np.diff(rows) > 0).all() and (np.diff(rows) <= SPAN + 1).all()
+    exposed = [frame.row for frame in rig.exposed[0][SLOTS[0]]]
+    assert rows[-1] == exposed[-1], "the newest is the last exposure"
+
+
+def test_a_rig_without_lenses_traces_nothing() -> None:
+  rig = Rig(replace(SMALL, render=False))
+  observation = _begin(rig)
+  observation = rig.step(hold(observation.state[0, -1])[None])
+  assert rig._renderer is None and rig.lenses == []
+  assert observation.image.shape[:3] == (1, 0, 1) and observation.state.shape[2] == 2

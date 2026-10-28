@@ -196,3 +196,21 @@ def test_a_scene_without_lights_is_lit_by_nothing_but_its_ambient() -> None:
   )
   view = Renderer(dark, {"above": (0, above)}, 32).render(data)["above"]
   assert (view.body == 0).all() and view.image.sum() == 0
+
+
+def test_many_scenes_draw_as_each_draws_alone(stood: Any) -> None:
+  model, hands, data = stood
+  renderer = Renderer(model, {hand.slot: (hand.base, NOMINAL) for hand in hands}, 48)
+  moved = mujoco.MjData(model)
+  moved.qpos[:] = data.qpos
+  moved.qpos[2] += 0.05
+  mujoco.mj_forward(model, moved)
+  names = [SLOTS[1], SLOTS[0]]
+  images, bodies = renderer.render_many([data, moved], names)
+  assert images.shape == (2, 2, 48, 48, 3) and bodies.shape == (2, 2, 48, 48)
+  for scene, one in enumerate((data, moved)):
+    alone = renderer.render(one)
+    for index, name in enumerate(names):
+      assert np.array_equal(images[scene, index], alone[name].image)
+      assert np.array_equal(bodies[scene, index], alone[name].body)
+  assert not np.array_equal(images[0, 1], images[1, 1]), "the moved hand's lens sees it"

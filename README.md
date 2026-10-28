@@ -33,9 +33,9 @@ has a leading axis over the `num_envs` parallel envs the rig holds.
 | --- | --- | --- |
 | `observation.row` | `(num_envs, rows)` int64 | the rows this step spanned |
 | `observation.state` | `(num_envs, rows, driven, 8)` | each driven hand at each row |
-| `observation.image` | `(num_envs, lenses, size, size, 3)` uint8 | what each lens saw, black outside the disc |
-| `observation.body` | `(num_envs, lenses, size, size)` int32 | the body each pixel struck, `-1` for none |
-| `observation.image_row` | `(num_envs, lenses)` int64 | the row each lens's frame was taken at |
+| `observation.image` | `(num_envs, lenses, frames, size, size, 3)` uint8 | each lens's newest frames, newest last, black outside the disc |
+| `observation.body` | `(num_envs, lenses, frames, size, size)` int32 | the body each pixel struck, `-1` for none |
+| `observation.image_row` | `(num_envs, lenses, frames)` int64 | the row each frame was taken at |
 | `action` | `(num_envs, chunk_size, driven, 8)` | the action chunk the driven hands follow |
 
 `Cfg.scene` is whatever the hands stand in, as a call that returns the
@@ -74,9 +74,13 @@ Nothing synchronizes a lens to any of this. Each fires at its own rate on the
 physics lattice, from wherever in its period an episode opens it, so it slips
 against the control step and against the other lens, and its shutter falls
 between rows as a capture's does. An episode draws where each lens stands from
-the seed it is reproduced by. The observation carries the newest exposure
-older than `camera_latency`, beside the row it was taken at; a dataset takes
-every exposure from `Rig.exposed`.
+the seed it is reproduced by. The observation carries the `Cfg.frames` newest
+exposures older than `camera_latency`, beside the rows they were taken
+at; a dataset takes every exposure from `Rig.exposed`. With `Cfg.record` off,
+the rig traces only the exposures an observation will deliver, which changes
+nothing the policy sees, and keeps none for a recorder. With `Cfg.render`
+off, the rig traces nothing and needs no GPU. Exposures that fall together in
+several envs are traced in one `Renderer.render_many` batch.
 
 ### Choosing the embodiment
 

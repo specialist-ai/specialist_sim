@@ -69,7 +69,7 @@ def test_the_idle_hand_stays_in_the_air_and_in_the_picture(
   model = env.rig.model
   seen = {
     model.body(int(body)).name
-    for body in np.unique(observation.body[0, 0])
+    for body in np.unique(observation.body[0, 0, -1])
     if body >= 0
   }
   assert any(name.startswith(SLOTS[0]) for name in seen), (
@@ -134,7 +134,9 @@ def test_an_env_hands_over_a_frame_as_old_as_it_asks_for() -> None:
     for _ in range(3):
       observation, report = env.step(hold(observation.state[0, -1])[None])
     age = (
-      observation.row[0, -1] - observation.image_row[0] - latency / SMALL.clock.row_dt
+      observation.row[0, -1]
+      - observation.image_row[0, :, -1]
+      - latency / SMALL.clock.row_dt
     )
     assert (age >= -0.5).all(), f"a latency of {latency}s delivered {age.tolist()}"
     assert (age <= span + 0.5).all(), (

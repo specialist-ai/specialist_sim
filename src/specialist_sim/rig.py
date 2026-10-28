@@ -76,6 +76,14 @@ class Cfg:
   camera_latency: float = 0.0
   """Seconds a frame takes to reach a policy once the shutter has fallen. The
   frame in hand is older still, by however long ago the shutter last fell."""
+  frames: int = 1
+  """How many of each lens's newest frames an observation carries."""
+  render: bool = True
+  """Whether the lenses are traced at all. Off, an observation carries no
+  frame and the rig needs no GPU."""
+  record: bool = True
+  """Whether every exposure is traced and kept in ``Rig.exposed`` for a
+  recorder. Off, only the exposures an observation delivers are traced."""
 
 
 @dataclass(frozen=True)
@@ -87,12 +95,13 @@ class Observation:
   state: Float64Array
   """The driven hands at each row, ``(num_envs, rows, driven, 8)``."""
   image: UInt8Array
-  """What each lens saw, ``(num_envs, lenses, size, size, 3)``, black outside
-  the disc."""
+  """Each lens's newest frames, ``(num_envs, lenses, frames, size, size, 3)``,
+  newest last, black outside the disc."""
   body: Int32Array
-  """The body each pixel struck, ``(num_envs, lenses, size, size)``, ``-1`` for none."""
+  """The body each pixel struck, ``(num_envs, lenses, frames, size, size)``, ``-1``
+  for none."""
   image_row: Int64Array
-  """The row each lens's frame was taken at, ``(num_envs, lenses)``."""
+  """The row each frame was taken at, ``(num_envs, lenses, frames)``."""
 
 
 @dataclass(frozen=True)
@@ -139,17 +148,28 @@ class Rig:
     self.slots = tuple(hand.slot for hand in self.hands)
     self._driven = [self.slots.index(slot) for slot in cfg.driven]
     """Which hands the action names."""
-    self.lenses = [s for s in self.slots if s in cfg.driven or s in cfg.seen]
+    self.lenses = [
+      slot
+      for slot in self.slots
+      if cfg.render and (slot in cfg.driven or slot in cfg.seen)
+    ]
     """The slots the observation carries frames for."""
     self.datas = [mujoco.MjData(model) for _ in range(num_envs)]
     self._scratch = mujoco.MjData(model)
-    self._renderer = Renderer(
-      model,
-      {
-        slot: (self.hands[self.slots.index(slot)].base, cfg.cameras.get(slot, NOMINAL))
-        for slot in self.lenses
-      },
-      cfg.image_size,
+    self._renderer = (
+      Renderer(
+        model,
+        {
+          slot: (
+            self.hands[self.slots.index(slot)].base,
+            cfg.cameras.get(slot, NOMINAL),
+          )
+          for slot in self.lenses
+        },
+        cfg.image_size,
+      )
+      if self.lenses
+      else None
     )
     self._interpolator = Interpolator(
       num_envs,
@@ -240,7 +260,7 @@ class Rig:
     per_frame = self._period[lens] / clock.per_row
     behind = self.cfg.camera_latency / clock.row_dt
     last = math.floor(0.5 / self._period[lens] - self._phase[env_idx, lens])
-    first = last - math.ceil(behind / per_frame) - 1
+    first = last - math.ceil(behind / per_frame) - self.cfg.frames
     image, body = self._shoot(env_idx, lens)
     self._shot[env_idx, lens] = last + 1
     self._next[env_idx, lens] = self._shutter(last + 1, env_idx, lens)
@@ -269,10 +289,8 @@ class Rig:
         list(self._pool.map(self._push, self._shares))
       elapsed = self.row * clock.per_row + substep + 1
       firing = np.argwhere(self._next == elapsed[:, None])
-      for env_idx in sorted({int(env_idx) for env_idx, _ in firing}):
-        mujoco.mj_kinematics(model, self.datas[env_idx])
-      for env_idx, lens in firing:
-        self._expose(int(env_idx), int(lens), int(elapsed[env_idx]))
+      if firing.size:
+        self._expose(firing, elapsed)
       if (substep + 1) % clock.per_row:
         continue
       row = (substep + 1) // clock.per_row
@@ -306,26 +324,65 @@ class Rig:
     step its episode opened at."""
     return int(round((shot + self._phase[env_idx, lens]) * self._period[lens]))
 
-  def _expose(self, env_idx: int, lens: int, elapsed: int) -> None:
-    """Fire one lens, for the observation to hand over and a dataset to
-    record, and wind it on to its next exposure."""
-    slot = self.lenses[lens]
-    frame = Frame(elapsed / self.cfg.clock.per_row, *self._shoot(env_idx, lens))
-    self._frames[env_idx][slot].append(frame)
-    self.exposed[env_idx][slot].append(frame)
-    self._shot[env_idx, lens] += 1
-    self._next[env_idx, lens] = self._shutter(
-      int(self._shot[env_idx, lens]), env_idx, lens
-    )
+  def _expose(self, firing: Int64Array, elapsed: Int64Array) -> None:
+    """Fire the lenses due now, ``(n, 2)`` env_idx and lens pairs, and wind each on
+    to its next exposure. The exposures an observation delivers, or every one
+    for a recorder, are traced in one batch per lens."""
+    per_row = self.cfg.clock.per_row
+    for lens in sorted({int(fired) for _, fired in firing}):
+      slot = self.lenses[lens]
+      env_ids = [int(env_idx) for env_idx, fired in firing if fired == lens]
+      wanted = [
+        env_idx
+        for env_idx in env_ids
+        if self._wanted(env_idx, lens, int(elapsed[env_idx]))
+      ]
+      if wanted:
+        datas = [self.datas[env_idx] for env_idx in wanted]
+        for data in datas:
+          mujoco.mj_kinematics(self.model, data)
+        assert self._renderer is not None
+        images, bodies = self._renderer.render_many(datas, [slot])
+        for env_idx, image, body in zip(
+          wanted, images[:, 0], bodies[:, 0], strict=True
+        ):
+          frame = Frame(int(elapsed[env_idx]) / per_row, image, body)
+          self._frames[env_idx][slot].append(frame)
+          if self.cfg.record:
+            self.exposed[env_idx][slot].append(frame)
+      for env_idx in env_ids:
+        self._shot[env_idx, lens] += 1
+        self._next[env_idx, lens] = self._shutter(
+          int(self._shot[env_idx, lens]), env_idx, lens
+        )
 
-  def _deliver(self, env_idx: int, lens: int) -> Frame:
-    """The newest exposure of a lens that has reached the policy, and the
-    oldest of its frames still worth keeping."""
+  def _wanted(self, env_idx: int, lens: int, elapsed: int) -> bool:
+    """Whether the exposure falling now is traced: always for a recorder, and
+    otherwise only if the first observation it reaches delivers it, as one of
+    the ``frames`` newest that have arrived. A later one delivers newer ones."""
+    cfg = self.cfg
+    if cfg.record:
+      return True
+    span = cfg.clock.per_row * cfg.clock.per_step
+    latency = cfg.camera_latency / cfg.clock.physics_dt
+    cutoff = math.ceil((elapsed + latency) / span) * span - latency
+    shot = int(self._shot[env_idx, lens])
+    newer = 0
+    while (
+      newer < cfg.frames and self._shutter(shot + newer + 1, env_idx, lens) <= cutoff
+    ):
+      newer += 1
+    return newer < cfg.frames
+
+  def _deliver(self, env_idx: int, lens: int) -> list[Frame]:
+    """The ``frames`` newest exposures of a lens that have reached the policy,
+    oldest first; older ones are dropped."""
     held = self._frames[env_idx][self.lenses[lens]]
     cutoff = self.row[env_idx] - self.cfg.camera_latency / self.cfg.clock.row_dt
-    at = max(index for index, frame in enumerate(held) if frame.at <= cutoff)
-    self._frames[env_idx][self.lenses[lens]] = held[at:]
-    return held[at]
+    newest = max(index for index, frame in enumerate(held) if frame.at <= cutoff)
+    oldest = max(0, newest + 1 - self.cfg.frames)
+    self._frames[env_idx][self.lenses[lens]] = held[oldest:]
+    return held[oldest : newest + 1]
 
   def _gather(self) -> None:
     for env_idx, data in enumerate(self.datas):
@@ -340,22 +397,30 @@ class Rig:
       mujoco.mj_step(self.model, data)
 
   def _shoot(self, env_idx: int, lens: int) -> tuple[UInt8Array, Int32Array]:
-    slot = self.lenses[lens]
-    view = self._renderer.render(self.datas[env_idx], (slot,))[slot]
-    return view.image, view.body
+    assert self._renderer is not None
+    images, bodies = self._renderer.render_many(
+      [self.datas[env_idx]], [self.lenses[lens]]
+    )
+    return images[0, 0], bodies[0, 0]
 
   def _observe(self) -> Observation:
-    rows = self.cfg.clock.per_step
-    frames = [
-      [self._deliver(env_idx, lens) for lens in range(len(self.lenses))]
-      for env_idx in range(self.num_envs)
-    ]
+    cfg = self.cfg
+    size, frames = cfg.image_size, cfg.frames
+    image = np.zeros((self.num_envs, len(self.lenses), frames, size, size, 3), np.uint8)
+    body = np.full((self.num_envs, len(self.lenses), frames, size, size), -1, np.int32)
+    image_row = np.zeros((self.num_envs, len(self.lenses), frames), np.int64)
+    for env_idx in range(self.num_envs):
+      for lens in range(len(self.lenses)):
+        for index, frame in enumerate(self._deliver(env_idx, lens)):
+          image[env_idx, lens, index] = frame.image
+          body[env_idx, lens, index] = frame.body
+          image_row[env_idx, lens, index] = frame.row
     return Observation(
-      row=self.row[:, None] + np.arange(1 - rows, 1),
+      row=self.row[:, None] + np.arange(1 - cfg.clock.per_step, 1),
       state=self.state_rows[:, :, self._driven].copy(),
-      image=np.stack([np.stack([frame.image for frame in taken]) for taken in frames]),
-      body=np.stack([np.stack([frame.body for frame in taken]) for taken in frames]),
-      image_row=np.array([[frame.row for frame in taken] for taken in frames]),
+      image=image,
+      body=body,
+      image_row=image_row,
     )
 
 
