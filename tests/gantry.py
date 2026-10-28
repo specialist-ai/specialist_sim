@@ -1,7 +1,7 @@
 """A gantry: the gripper on six servoed joints, an embodiment that is a joint chain.
 
 Three slides along the room's axes carry three hinges, yaw then pitch then
-roll, and the gripper base sits at the wrist's center. Every pose has a joint
+roll, and the gripper's base tag sits at the wrist's center. Every pose has a joint
 configuration in closed form, so placement and tracking need no solver. The
 chain carries no geometry of its own, so a lens sees what it sees on the free
 rig.
@@ -52,7 +52,7 @@ class Gantry:
           biasprm=[0.0, -kp, -kv] + [0.0] * 7,
         )
         parent = body
-      scene.attach(gripper.spec(), prefix=f"{slot}_", frame=parent.add_frame())
+      gripper.attach(scene, parent, slot)
 
   def bind(self, model: mujoco.MjModel) -> tuple[Hand, ...]:
     hands = tuple(gripper.bind(model, slot) for slot in self.slots)

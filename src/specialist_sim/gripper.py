@@ -1,5 +1,9 @@
 """The described gripper: a base, two servoed fingers, and the pads they grip
-with. A hand's state is its base's pose and its left finger's angle.
+with. A hand's state is the pose of its base tag and its left finger's angle.
+
+The base tag is the frame a capture tracks a hand by, the corpus's hand frame.
+The description puts it at the base as a placeholder; it sits ``TAG_OFFSET``
+behind the base along the base's x, with the base's rotation.
 """
 
 from __future__ import annotations
@@ -18,9 +22,12 @@ __all__ = [
   "OPEN",
   "SHUT",
   "SLOTS",
+  "TAG_OFFSET",
   "VARIANT",
   "Hand",
+  "attach",
   "bind",
+  "frame",
   "grasp",
   "grip",
   "pads",
@@ -45,36 +52,51 @@ GRIPPING = 4
 FINGER_HZ = 50.0
 FINGER_RATIO = 1.0
 """How fast the finger servo answers a commanded angle, and how it damps."""
-PAD_SOLREF = 0.010
-"""How long a pad takes to answer a contact."""
+TAG_OFFSET = 0.025
+"""How far behind the base the base tag sits, along the base's x, meters.
+specialist_rlft's replay of the 0927 takes fit it: the only range at which the
+recorded grasps hold their brick."""
 
 
 @dataclass(frozen=True)
 class Hand:
   slot: str
   base: int
-  """The body a pose names."""
+  """The body the lens rides; the state is its tag, ``TAG_OFFSET`` behind it."""
   fingers: tuple[int, int]
   """Where the left and right finger angles sit in ``qpos``."""
   servos: tuple[int, int]
   """The left and right finger position servos."""
 
 
-def spec() -> mujoco.MjSpec:
-  """The gripper as described, with this rig's finger servo and pad compliance."""
+def spec(side: int) -> mujoco.MjSpec:
+  """The gripper as described, with this rig's finger servo. The description
+  lets two grippers pass through each other, so the hand on each ``side``
+  (its index in ``SLOTS``) gets a contact bit of its own that meets the other's."""
   described = mujoco.MjSpec.from_file(str(specialist_description.mjcf_path(VARIANT)))
   turn = 2.0 * np.pi * FINGER_HZ
-  for side in ("left", "right"):
-    servo = described.actuator(f"{side}_finger")
-    swung = described.joint(f"{side}_finger").armature
+  for finger in ("left", "right"):
+    servo = described.actuator(f"{finger}_finger")
+    swung = described.joint(f"{finger}_finger").armature
     servo.biastype = mujoco.mjtBias.mjBIAS_AFFINE
     servo.gainprm[0] = swung * turn * turn
     servo.biasprm[1] = -swung * turn * turn
     servo.biasprm[2] = -2.0 * FINGER_RATIO * swung * turn
   for geom in described.geoms:
-    if geom.condim == GRIPPING:
-      geom.solref[0] = PAD_SOLREF
+    if geom.contype == 2:
+      geom.contype = 2 << side
+      geom.conaffinity = 1 | (2 << (1 - side))
   return described
+
+
+def attach(scene: mujoco.MjSpec, body: mujoco.MjsBody, slot: str) -> None:
+  """Seat a slot's gripper on the embodiment's ``body`` that carries it, whose
+  frame is the hand's base tag: the base ``TAG_OFFSET`` ahead along its x."""
+  scene.attach(
+    spec(SLOTS.index(slot)),
+    prefix=f"{slot}_",
+    frame=body.add_frame(pos=[TAG_OFFSET, 0.0, 0.0]),
+  )
 
 
 def bind(model: mujoco.MjModel, slot: str) -> Hand:
@@ -104,9 +126,17 @@ def pads(model: mujoco.MjModel, hand: Hand) -> Int64Array:
   return out
 
 
+def frame(data: mujoco.MjData, hand: Hand) -> tuple[Float64Array, Float64Array]:
+  """Where a hand's base tag stands in the room: its position and its
+  ``(3, 3)`` rotation, read off ``data``'s kinematics."""
+  rotation = data.xmat[hand.base].reshape(3, 3)
+  position: Float64Array = data.xpos[hand.base] - TAG_OFFSET * rotation[:, 0]
+  return position, rotation
+
+
 def grasp(model: mujoco.MjModel, hand: Hand) -> Float64Array:
-  """Where the pads meet when shut, in the base frame: the middle of the two
-  pads farthest from the finger hinge."""
+  """Where the pads meet when shut, in the base tag's frame: the middle of
+  the two pads farthest from the finger hinge."""
   data = mujoco.MjData(model)
   data.qpos[list(hand.fingers)] = SHUT, -SHUT
   mujoco.mj_forward(model, data)
@@ -119,9 +149,8 @@ def grasp(model: mujoco.MjModel, hand: Hand) -> Float64Array:
     reach = np.linalg.norm(data.geom_xpos[own] - hinge, axis=1)
     tips.append(data.geom_xpos[own[np.argmax(reach)]])
   middle = 0.5 * (tips[0] + tips[1])
-  out: Float64Array = data.xmat[hand.base].reshape(3, 3).T @ (
-    middle - data.xpos[hand.base]
-  )
+  position, rotation = frame(data, hand)
+  out: Float64Array = rotation.T @ (middle - position)
   return out
 
 
@@ -131,14 +160,14 @@ def states(
   hands: Sequence[Hand],
   qpos: Float64Array,
 ) -> Float64Array:
-  """Every hand read out of ``qpos``, ``(n, nq)``: its base's position and
+  """Every hand read out of ``qpos``, ``(n, nq)``: its base tag's position and
   quaternion, then its left finger's angle, ``(n, hands, 8)``."""
   out = np.empty((len(qpos), len(hands), 8))
   for row, state in enumerate(qpos):
     scratch.qpos[:] = state
     mujoco.mj_kinematics(model, scratch)
     for index, hand in enumerate(hands):
-      out[row, index, :3] = scratch.xpos[hand.base]
+      out[row, index, :3] = frame(scratch, hand)[0]
       out[row, index, 3:7] = scratch.xquat[hand.base]
       out[row, index, 7] = state[hand.fingers[0]]
   return out
@@ -151,7 +180,7 @@ def twists(
   qpos: Float64Array,
   qvel: Float64Array,
 ) -> Float64Array:
-  """Every hand's base velocity in the room frame, linear then angular,
+  """Every hand's base tag velocity in the room frame, linear then angular,
   ``(n, hands, 6)``."""
   out = np.empty((len(qpos), len(hands), 6))
   twist = np.empty(6)
@@ -165,6 +194,7 @@ def twists(
       mujoco.mj_objectVelocity(
         model, scratch, mujoco.mjtObj.mjOBJ_XBODY, hand.base, twist, 0
       )
-      out[row, index, :3] = twist[3:]
+      behind = frame(scratch, hand)[0] - scratch.xpos[hand.base]
+      out[row, index, :3] = twist[3:] + np.cross(twist[:3], behind)
       out[row, index, 3:] = twist[:3]
   return out

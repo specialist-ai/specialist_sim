@@ -12,8 +12,9 @@ from scene import bare
 from specialist_sim import rotation
 from specialist_sim.action import CHUNK_SIZE, hold
 from specialist_sim.camera import NOMINAL
-from specialist_sim.embodiment import Embodiment
-from specialist_sim.gripper import OPEN, SHUT, SLOTS
+from specialist_sim.embodiment import Embodiment, Floating
+from specialist_sim.gripper import GRIPPING, OPEN, SHUT, SLOTS
+from specialist_sim.physics import Physics
 from specialist_sim.rig import Cfg, Clock, Observation, Rig
 
 
@@ -149,16 +150,25 @@ def test_a_plan_reaches_past_the_step_that_executes_it() -> None:
   assert rig.datas[0].qpos == pytest.approx(followed)
 
 
-def test_a_wild_command_makes_the_env_unstable_and_leaves_it_finite(
+def test_an_env_mujoco_cannot_carry_is_unstable_and_left_finite(
   embodiment: Embodiment,
 ) -> None:
   rig = Rig(replace(SMALL, embodiment=embodiment))
   _begin(rig)
-  rig.step(np.full((1, CHUNK_SIZE, 2, 8), 1e6))
+  rig.datas[0].qvel[:] = 1e30
+  rig.step(hold(rig.state_rows[:, -1]))
   assert np.isfinite(rig.datas[0].qpos).all() and np.isfinite(rig.datas[0].qvel).all()
   assert rig.unstable[0]
   _begin(rig)
   assert not rig.unstable[0]
+
+
+def test_the_free_rig_caps_its_pull_so_a_wild_command_stays_stable() -> None:
+  rig = Rig(SMALL)
+  _begin(rig)
+  rig.step(np.full((1, CHUNK_SIZE, 2, 8), 1e6))
+  assert not rig.unstable[0]
+  assert np.isfinite(rig.datas[0].qpos).all() and np.isfinite(rig.datas[0].qvel).all()
 
 
 def test_a_step_reports_the_rows_it_spanned() -> None:
@@ -351,3 +361,19 @@ def test_the_rows_of_a_step_are_kept_for_a_reader() -> None:
     assert np.array_equal(rig.qvel_rows[env_idx, -1], data.qvel)
   assert np.array_equal(rig.states(rig.qpos_rows[0]), observation.state[0])
   assert rig.twists(rig.qpos_rows[0], rig.qvel_rows[0]).shape == (rows, 2, 6)
+
+
+def test_the_rig_runs_under_the_physics_it_is_given() -> None:
+  rig = Rig(replace(SMALL, physics=Physics(impratio=50.0)))
+  model = rig.model
+  assert model.opt.impratio == 50.0
+  assert model.opt.integrator == mujoco.mjtIntegrator.mjINT_IMPLICITFAST
+  pads = model.geom_condim == GRIPPING
+  assert pads.any() and (model.geom_priority[pads] == 1).all()
+  assert model.geom_solref[pads] == pytest.approx(
+    np.tile(Physics().pad_solref, (pads.sum(), 1))
+  )
+  rig_dof = model.body(f"{SLOTS[0]}_rig").dofadr[0]
+  assert model.dof_damping[rig_dof] == Floating().damping, (
+    "an embodiment keeps its own damping"
+  )

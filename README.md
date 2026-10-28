@@ -25,7 +25,7 @@ observation = rig.begin([0])
 observation = rig.step(hold(observation.state[:, -1]))
 ```
 
-A hand is eight numbers: its gripper base's room-frame position, a rotation
+A hand is eight numbers: its base tag's room-frame position, a rotation
 as a `wxyz` quaternion, and its left finger's angle in radians. Every array
 has a leading axis over the `num_envs` parallel envs the rig holds.
 
@@ -84,7 +84,7 @@ every exposure from `Rig.exposed`.
 `left_gripper` and `right_gripper`, the scene holds. Another embodiment
 implements `specialist_sim.embodiment.Embodiment`: it stands the hands in the
 scene, binds their ids, puts a hand at a pose, and writes `ctrl` and `xfrc`
-for every env each physics step. A hand's state is its gripper base's pose
+for every env each physics step. A hand's state is its base tag's pose
 whatever carries it, so a policy is not told. `tests/gantry.py` is such an
 embodiment, a joint chain driven through `ctrl`, and the seam tests run on it
 beside the free rig.

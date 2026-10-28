@@ -8,11 +8,11 @@ from __future__ import annotations
 import math
 import os
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import mujoco
 import numpy as np
-from mujoco import rollout
 
 from specialist_sim import gripper
 from specialist_sim.action import Interpolator, hold
@@ -25,6 +25,7 @@ from specialist_sim.arrays import (
 from specialist_sim.camera import NOMINAL, Camera
 from specialist_sim.embodiment import Embodiment, Floating
 from specialist_sim.gripper import SLOTS
+from specialist_sim.physics import Physics
 from specialist_sim.render import Renderer
 
 __all__ = ["Cfg", "Clock", "Frame", "Observation", "Rig"]
@@ -64,6 +65,7 @@ class Cfg:
   """What the hands stand in."""
   embodiment: Embodiment = field(default_factory=Floating)
   clock: Clock = Clock()
+  physics: Physics = Physics()
   cameras: dict[str, Camera] = field(default_factory=dict)
   """The lens each hand carries, by slot; a slot left out carries the nominal one."""
   image_size: int = 240
@@ -108,13 +110,21 @@ class Frame:
     return int(round(self.at))
 
 
-STATE = mujoco.mjtState.mjSTATE_FULLPHYSICS
-DRIVES = mujoco.mjtState.mjSTATE_CTRL | mujoco.mjtState.mjSTATE_XFRC_APPLIED
+UNSTABLE = (
+  mujoco.mjtWarning.mjWARN_BADQPOS,
+  mujoco.mjtWarning.mjWARN_BADQVEL,
+  mujoco.mjtWarning.mjWARN_BADQACC,
+)
+"""The warnings MuJoCo raises as it resets an env it cannot carry."""
 
 
 class Rig:
   """``num_envs`` copies of the scene with the hands standing in it. The
-  envs' data are the truth between steps."""
+  envs' data are the truth between and during steps.
+
+  Each env steps its own ``MjData`` with ``mj_step`` on a thread pool, which
+  MuJoCo runs without the GIL, so an env lands bitwise where it would alone and
+  keeps its solver's warm start from one physics step to the next."""
 
   def __init__(self, cfg: Cfg, num_envs: int = 1):
     self.cfg = cfg
@@ -123,6 +133,7 @@ class Rig:
     spec = cfg.scene()
     cfg.embodiment.attach(spec)
     self.model = model = spec.compile()
+    cfg.physics.apply(model)
     model.opt.timestep = clock.physics_dt
     self.hands = cfg.embodiment.bind(model)
     self.slots = tuple(hand.slot for hand in self.hands)
@@ -148,16 +159,12 @@ class Rig:
       clock.action_dt,
     )
     threads = min(num_envs, os.cpu_count() or 1)
-    self._roll = rollout.Rollout(nthread=threads)
-    self._pool = [mujoco.MjData(model) for _ in range(threads)]
-    self._state = np.zeros((num_envs, mujoco.mj_stateSize(model, STATE)))
-    self._stepped = np.zeros((num_envs, 1, self._state.shape[1]))
-    self._warmstart = np.zeros((num_envs, model.nv))
-    self._control = np.zeros((num_envs, 1, mujoco.mj_stateSize(model, DRIVES)))
-    self._ctrl = self._control[:, 0, : model.nu]
-    self._xfrc = self._control[:, 0, model.nu :].reshape(num_envs, model.nbody, 6)
-    self._qpos = self._state[:, 1 : 1 + model.nq]
-    self._qvel = self._state[:, 1 + model.nq : 1 + model.nq + model.nv]
+    self._pool = ThreadPoolExecutor(threads) if threads > 1 else None
+    self._shares = [range(part, num_envs, threads) for part in range(threads)]
+    """The envs each thread steps."""
+    self._qpos = np.zeros((num_envs, model.nq))
+    self._ctrl = np.zeros((num_envs, model.nu))
+    self._xfrc = np.zeros((num_envs, model.nbody, 6))
     rows, hands = clock.per_step, len(self.slots)
     self.qpos_rows = np.zeros((num_envs, rows, model.nq))
     self.qvel_rows = np.zeros((num_envs, rows, model.nv))
@@ -182,7 +189,7 @@ class Rig:
     self.row = np.zeros(num_envs, np.int64)
     """The row each env stands on."""
     self.unstable = np.zeros(num_envs, np.bool_)
-    """Whether MuJoCo could not carry the env since it began."""
+    """Whether MuJoCo reset the env for want of a finite state since it began."""
     self.tracking_error = np.zeros(num_envs)
     """The largest gap between a driven hand and its setpoint at the last
     step's end, in meters."""
@@ -213,7 +220,9 @@ class Rig:
     states = self.states(self._qpos[chosen])
     self.state_rows[chosen] = states[:, None]
     self.qpos_rows[chosen] = self._qpos[chosen, None]
-    self.qvel_rows[chosen] = self._qvel[chosen, None]
+    self.qvel_rows[chosen] = np.stack([self.datas[env_idx].qvel for env_idx in chosen])[
+      :, None
+    ]
     self._interpolator.hold(chosen, states)
     self.cfg.embodiment.reset(chosen, self._qpos)
     self._phase[chosen] = 0.0 if phases is None else phases
@@ -247,41 +256,36 @@ class Rig:
     full = hold(self._interpolator.last, action.shape[1])
     full[:, :, self._driven] = action
     self._interpolator.process(full)
-    self._gather()
-    began = self._state[:, 0].copy()
+    warned = np.array([_warnings(data) for data in self.datas])
     self.exposed = [{slot: [] for slot in self.lenses} for _ in range(self.num_envs)]
     for substep in range(clock.per_row * clock.per_step):
+      self._gather()
       self.cfg.embodiment.command(
         self._interpolator, substep, self._qpos, self._ctrl, self._xfrc
       )
-      self._roll.rollout(
-        model,
-        self._pool,
-        self._state,
-        self._control,
-        control_spec=DRIVES,
-        nstep=1,
-        state=self._stepped,
-        initial_warmstart=self._warmstart,
-      )
-      self._state[:] = self._stepped[:, 0]
+      if self._pool is None:
+        self._push(self._shares[0])
+      else:
+        list(self._pool.map(self._push, self._shares))
       elapsed = self.row * clock.per_row + substep + 1
       firing = np.argwhere(self._next == elapsed[:, None])
-      if firing.size:
-        self._land(sorted({int(env_idx) for env_idx, _ in firing}))
-        for env_idx, lens in firing:
-          self._expose(int(env_idx), int(lens), int(elapsed[env_idx]))
+      for env_idx in sorted({int(env_idx) for env_idx, _ in firing}):
+        mujoco.mj_kinematics(model, self.datas[env_idx])
+      for env_idx, lens in firing:
+        self._expose(int(env_idx), int(lens), int(elapsed[env_idx]))
       if (substep + 1) % clock.per_row:
         continue
       row = (substep + 1) // clock.per_row
-      self.qpos_rows[:, row - 1] = self._qpos
-      self.qvel_rows[:, row - 1] = self._qvel
-    self._land()
+      for env_idx, data in enumerate(self.datas):
+        self.qpos_rows[env_idx, row - 1] = data.qpos
+        self.qvel_rows[env_idx, row - 1] = data.qvel
+    for data in self.datas:
+      mujoco.mj_forward(model, data)
     self.row += clock.per_step
     self.state_rows = self.states(self.qpos_rows.reshape(-1, model.nq)).reshape(
       self.state_rows.shape
     )
-    self.unstable |= self._state[:, 0] < began + clock.step_dt - 0.5 * clock.physics_dt
+    self.unstable |= np.array([_warnings(data) for data in self.datas]) > warned
     apart = (
       self.state_rows[:, -1, self._driven, :3]
       - self._interpolator.position[:, -1, self._driven]
@@ -294,7 +298,7 @@ class Rig:
     return gripper.states(self.model, self._scratch, self.hands, qpos)
 
   def twists(self, qpos: Float64Array, qvel: Float64Array) -> Float64Array:
-    """Every hand's base velocity in the room frame, ``(n, hands, 6)``."""
+    """Every hand's base tag velocity in the room frame, ``(n, hands, 6)``."""
     return gripper.twists(self.model, self._scratch, self.hands, qpos, qvel)
 
   def _shutter(self, shot: int, env_idx: int, lens: int) -> int:
@@ -325,13 +329,15 @@ class Rig:
 
   def _gather(self) -> None:
     for env_idx, data in enumerate(self.datas):
-      mujoco.mj_getState(self.model, data, self._state[env_idx], STATE)
+      self._qpos[env_idx] = data.qpos
 
-  def _land(self, env_ids: Sequence[int] | None = None) -> None:
-    for env_idx in range(self.num_envs) if env_ids is None else env_ids:
+  def _push(self, share: Sequence[int]) -> None:
+    """One physics step of the envs in ``share``, under the commanded drives."""
+    for env_idx in share:
       data = self.datas[env_idx]
-      mujoco.mj_setState(self.model, data, self._state[env_idx], STATE)
-      mujoco.mj_forward(self.model, data)
+      data.ctrl[:] = self._ctrl[env_idx]
+      data.xfrc_applied[:] = self._xfrc[env_idx]
+      mujoco.mj_step(self.model, data)
 
   def _shoot(self, env_idx: int, lens: int) -> tuple[UInt8Array, Int32Array]:
     slot = self.lenses[lens]
@@ -351,3 +357,8 @@ class Rig:
       body=np.stack([np.stack([frame.body for frame in taken]) for taken in frames]),
       image_row=np.array([[frame.row for frame in taken] for taken in frames]),
     )
+
+
+def _warnings(data: mujoco.MjData) -> int:
+  """How many times MuJoCo has reset ``data`` for want of a finite state."""
+  return sum(int(data.warning[kind].number) for kind in UNSTABLE)

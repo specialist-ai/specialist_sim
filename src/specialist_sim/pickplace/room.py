@@ -77,7 +77,7 @@ class Room:
     )
     """Every gripping pad in the room, which is what a grasp touches with."""
     self.grasp = gripper.grasp(model, hands[0])
-    """Where a hand's pads meet when shut, in its base frame."""
+    """Where a hand's pads meet when shut, in its base tag's frame."""
     self.pinch = self._pinch(hands[0])
     """The opening at which the pads just touch a cube seated between them."""
 
@@ -92,7 +92,8 @@ class Room:
     a cube seated where the pads meet."""
     model, data = self.model, mujoco.MjData(self.model)
     mujoco.mj_forward(model, data)
-    seat = data.xpos[hand.base] + data.xmat[hand.base].reshape(3, 3) @ self.grasp
+    position, rotation = gripper.frame(data, hand)
+    seat = position + rotation @ self.grasp
     data.qpos[self.cube.qpos : self.cube.qpos + 3] = seat
     pads = gripper.pads(model, hand)
 

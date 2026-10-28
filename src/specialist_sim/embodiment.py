@@ -80,13 +80,18 @@ class Floating:
   speed: float = 1.5
   turn: float = 10.0
   """The fastest the feedforward asks a rig to go, in meters and radians a second."""
+  max_force: float = 25.0
+  max_torque: float = 1.5
+  """What the rig may push and twist with, N and N m: a few times the
+  gripper's 4 N weight, so a hand stops when the fingertips meet the table
+  instead of driving through it."""
 
   def attach(self, scene: mujoco.MjSpec) -> None:
     for slot in self.slots:
       rig = scene.worldbody.add_body(name=f"{slot}_rig")
       rig.add_freejoint(name=f"{slot}_rig")
       rig.mass, rig.inertia = RIG_MASS, [RIG_INERTIA] * 3
-      scene.attach(gripper.spec(), prefix=f"{slot}_", frame=rig.add_frame())
+      gripper.attach(scene, rig, slot)
 
   def bind(self, model: mujoco.MjModel) -> tuple[Hand, ...]:
     hands = tuple(gripper.bind(model, slot) for slot in self.slots)
@@ -129,14 +134,14 @@ class Floating:
     apart = rotation.log(
       rotation.multiply(interpolator.quaternion[:, substep], rotation.conjugate(facing))
     )
-    xfrc[:, self._carried, :3] = self._weight
-    xfrc[:, self._rigs, :3] += (
+    pull = (
       self.stiffness * (interpolator.position[:, substep] - here)
       + self._damping[:, :3] * twist[..., :3]
     )
-    xfrc[:, self._rigs, 3:] = (
-      self.rotational_stiffness * apart + self._damping[:, 3:] * twist[..., 3:]
-    )
+    turn = self.rotational_stiffness * apart + self._damping[:, 3:] * twist[..., 3:]
+    xfrc[:, self._carried, :3] = self._weight
+    xfrc[:, self._rigs, :3] += _capped(pull, self.max_force)
+    xfrc[:, self._rigs, 3:] = _capped(turn, self.max_torque)
     gripper.grip(ctrl, self._servos, interpolator.opening[:, substep])
 
 
