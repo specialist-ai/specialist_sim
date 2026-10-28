@@ -44,7 +44,7 @@ class Embodiment(Protocol):
     ...
 
   def reset(self, env_ids: Sequence[int], qpos: Float64Array) -> None:
-    """Take up the named envs where their reset put them; ``qpos`` is
+    """Take up the named envs where their reset put them. ``qpos`` is
     every env's, ``(num_envs, nq)``."""
     ...
 

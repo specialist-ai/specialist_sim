@@ -3,7 +3,7 @@
 The room frame is the corpus's: the midpoint of the two anchor tags is the origin, +y runs
 from tag 4 to tag 5, +z is up. In it the operator stands at +x and the bins back onto the far
 edge of the desk at -x. Every number here was measured off the two takes of
-``0927_sort_lego_simple`` by ``specialist_rlft``'s ``scripts/build_demos.py`` (see its report);
+``0927_sort_lego_simple`` by ``specialist_rlft``'s ``scripts/build_demos.py`` (see its report),
 none is a guess from a product page except the articles' own sizes. This file is that repo's
 ``scene.py`` unchanged, so a sim episode here stands where its demonstrations and experts do.
 

@@ -5,7 +5,7 @@ The headset reports in WebXR's ``local-floor`` space: y up, the floor at
 y = 0, -z the way the operator faced at the start, quaternions ``[w, x, y,
 z]``. The room frame has z up and the operator at +x facing -x. ``Anchor`` maps
 one to the other. ``facing`` stands a scene's focus ``REACH`` ahead of the
-head, the room's floor on the real one; ``steer`` and ``nudged`` move it from
+head, the room's floor on the real one. ``steer`` and ``nudged`` move it from
 there, turning it about the focus.
 """
 

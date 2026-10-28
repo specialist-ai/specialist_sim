@@ -229,7 +229,7 @@ class Rig:
   def begin(
     self, env_ids: Sequence[int], phases: Float64Array | None = None
   ) -> Observation:
-    """Open an episode in the named envs where their data stand; every
+    """Open an episode in the named envs where their data stand. Every
     other carries on. ``phases``, ``(len(env_ids), lenses)`` in ``[0, 1)``, is where
     each lens stands in its own period."""
     chosen = list(env_ids)
@@ -425,7 +425,7 @@ class Rig:
 
   def _deliver(self, env_idx: int, lens: int) -> list[Frame]:
     """The ``frames`` newest exposures of a lens that have reached the policy,
-    oldest first; older ones are dropped."""
+    oldest first. Older ones are dropped."""
     held = self._frames[env_idx][self.lenses[lens]]
     cutoff = self.row[env_idx] - self.cfg.camera_latency / self.cfg.clock.row_dt
     newest = max(index for index, frame in enumerate(held) if frame.at <= cutoff)

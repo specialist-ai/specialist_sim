@@ -193,7 +193,7 @@ class _Lens:
 
 class Renderer:
   """Every camera's view of a scene, from any data of its model. ``cameras``
-  names each view: the body it rides and the camera seated there; a camera
+  names each view: the body it rides and the camera seated there. A camera
   named for a slot cannot see that hand's housing."""
 
   def __init__(

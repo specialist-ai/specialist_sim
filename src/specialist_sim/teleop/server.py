@@ -5,8 +5,8 @@ WebXR needs a secure context: ``localhost`` over ``adb reverse`` (``keep_reverse
 Messages are JSON unless noted:
 
 * page to server: ``input`` each XR frame (head and tracked controllers, poses ``[x, y, z, w, x, y,
-  z]`` in ``local-floor`` space, trigger, squeeze, buttons, axes); ``command`` (one of ``COMMANDS``);
-  ``layout`` (mode and bricks for the trays to come); ``nudge`` (a step of the scene).
+  z]`` in ``local-floor`` space, trigger, squeeze, buttons, axes), ``command`` (one of ``COMMANDS``),
+  ``layout`` (mode and bricks for the trays to come) and ``nudge`` (a step of the scene).
 * server to page: ``scene`` once (``stage``), ``frame`` at ``RATE`` (moving geom poses as float32
   ``[x, y, z, w, x, y, z]``, the anchor, the status, the head and controllers in the room frame),
   ``pulse``, and binary lens pictures: one byte of name length, the name, then a JPEG.
@@ -57,8 +57,8 @@ RATE = 60.0
 DRAWN = (1, 2)
 """The geom groups the scene draws with, as the lens does."""
 COMMANDS = ("record", "drop", "recenter")
-"""What the operator asks of a recording: start it, or keep it and start the next; drop it and pause
-on a new tray; stand the sim in front of the headset again."""
+"""What the operator asks of a recording: start it, or keep it and start the next. Drop it and pause
+on a new tray. Stand the scene in front of the headset again."""
 BUTTONS = {("right", 4): "record", ("right", 5): "drop", ("left", 4): "recenter"}
 """What a Touch controller's buttons command, by their index in a WebXR ``xr-standard`` gamepad:
 A records, B drops, X recenters."""

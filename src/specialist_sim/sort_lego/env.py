@@ -1,6 +1,6 @@
 """The LEGO sorting environment: the rig standing at the 0927 desk, and every
 env's tray judged after every step. Success is every brick that started on the
-tray sorted into the bin of its color; progress is the share sorted.
+tray sorted into the bin of its color, and progress is the share sorted.
 
 Time runs on 150 Hz rows, the lattice a dataset packs, with actions at 50 Hz
 and the lens firing every fifth row, on the rows exactly, as the dataset build
@@ -62,7 +62,7 @@ class Cfg:
   driven: tuple[str, ...] = SLOTS
   mode: str = "drop"
   bricks: int | None = None
-  """How many bricks a tray starts with; ``None`` lets the mode draw its count."""
+  """How many bricks a tray starts with. ``None`` lets the mode draw its count."""
   colors: tuple[str, ...] = COLORS
   swapped: bool = False
   """Whether every brick and bin card is drawn in the other color."""
@@ -138,7 +138,7 @@ class SortLegoEnv:
   ) -> tuple[Observation, Report]:
     """Open an episode in every env, or only in the ones named, each on the
     layout its seed draws. The hands start where the task puts them or, given
-    ``hands`` ``(hands, 8)``, there; then seeds that would put a brick in a
+    ``hands`` ``(hands, 8)``, there, and then seeds that would put a brick in a
     hand are passed over, and ``layouts`` names the seed laid."""
     cfg = self.cfg
     chosen = list(range(self.num_envs)) if env_ids is None else list(env_ids)

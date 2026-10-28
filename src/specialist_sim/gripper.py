@@ -2,7 +2,7 @@
 with. A hand's state is the pose of its base tag and its left finger's angle.
 
 The base tag is the frame a capture tracks a hand by, the corpus's hand frame.
-The description puts it at the base as a placeholder; it sits ``TAG_OFFSET``
+The description puts it at the base as a placeholder. It sits ``TAG_OFFSET``
 behind the base along the base's x, with the base's rotation.
 """
 
@@ -62,7 +62,7 @@ recorded grasps hold their brick."""
 class Hand:
   slot: str
   base: int
-  """The body the lens rides; the state is its tag, ``TAG_OFFSET`` behind it."""
+  """The body the lens rides. The state is its tag, ``TAG_OFFSET`` behind it."""
   fingers: tuple[int, int]
   """Where the left and right finger angles sit in ``qpos``."""
   servos: tuple[int, int]

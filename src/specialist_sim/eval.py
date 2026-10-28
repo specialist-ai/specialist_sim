@@ -80,7 +80,7 @@ class Env(Protocol):
 
 class Policy(Protocol):
   def reset(self, env_ids: Sequence[int], seeds: Sequence[int]) -> None:
-    """Clear the named envs' state; each runs the seed beside it."""
+    """Clear the named envs' state. Each runs the seed beside it."""
     ...
 
   def predict_action_chunk(self, observation: Observation) -> Float64Array:

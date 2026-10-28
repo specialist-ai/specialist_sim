@@ -1,6 +1,6 @@
 """Record LEGO sorting episodes by teleoperation: a Quest carries the grippers,
 a browser tab is the console. This is the first-choice way to collect
-demonstrations in simulation; ``scripts/record_scripted.py`` is the fallback.
+demonstrations in simulation, and ``scripts/record_scripted.py`` is the fallback.
 
   uv run --extra teleop python scripts/record.py --out data/episodes/NAME
 
@@ -9,7 +9,7 @@ address in the headset's browser and press Enter VR or Enter AR. With the
 headset on USB, the run keeps the adb reverse in place. Over Wi-Fi, serve with
 ``--cert`` and ``--key``.
 
-    grip, squeezed    bind the gripper on that side; squeeze again to release it
+    grip, squeezed    bind the gripper on that side, squeeze again to release it
     trigger           close the jaws of a bound gripper
     A  (console R)    paused: record. Recording: keep the episode, lay a new tray, record it
     B  (console D)    drop the episode, lay a new tray, and pause
@@ -162,16 +162,16 @@ def main() -> None:
         path = episode.save(args.out, recorder.finish({"score": score.as_dict()}))
         kept += 1
         note = (
-          f"kept {path.stem}: {score.sorted}/{score.started} sorted; recording the next"
+          f"kept {path.stem}: {score.sorted}/{score.started} sorted. Recording the next"
         )
         print(note)
         new_tray()
         start()
       elif command == "drop":
-        note = "a new tray; A to record it"
+        note = "a new tray. A to record it"
         if recorder.name is not None:
           recorder.discard()
-          note = "dropped the episode; A to record this tray"
+          note = "dropped the episode. A to record this tray"
           print(note)
         new_tray()
       elif command == "recenter" and inputs is not None:

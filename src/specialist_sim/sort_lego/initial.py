@@ -14,7 +14,7 @@ A layout is a function of ``(mode, seed, bricks)``, which each episode records,
 so a later run lays the same tray again. ``bricks`` sets how many lie on the
 tray, of any colors.
 
-A driven hand starts at ``home``, over the tray's near corner on its side; a
+A driven hand starts at ``home``, over the tray's near corner on its side. A
 hand nobody drives waits ``aside``, out of every lens.
 """
 
@@ -79,7 +79,7 @@ class Layout:
   mode: str
   seed: int
   bricks: int | None
-  """How many bricks were asked for; ``None`` lets the mode draw its count."""
+  """How many bricks were asked for. ``None`` lets the mode draw its count."""
   poses: Float64Array
   """Every brick, ``(k, 7)`` position and wxyz."""
   active: BoolArray
@@ -187,7 +187,7 @@ def draw(
 ) -> Layout:
   """One tray laid out ``mode``'s way from ``seed``, ``bricks`` of ``colors`` on it."""
   if mode not in MAKERS:
-    raise ValueError(f"no layout {mode!r}; one of {MODES}")
+    raise ValueError(f"no layout {mode!r}, only {MODES}")
   rng = np.random.default_rng(seed)
   if mode == "single":
     count = 1

@@ -101,7 +101,7 @@ def _container(
   )
   # A tossed brick falls a few millimeters a step, more than a 2 mm wall is thick, so every
   # collider is grown away from the inside: the floor down into the desk, the walls outward.
-  # The inside keeps its measured size; static geoms never collide with one another.
+  # The inside keeps its measured size. Static geoms never collide with one another.
   t = THICK
   walls = {
     "floor": ((0.0, 0.0, 2 * half - t), (length / 2.0, width / 2.0, t)),
@@ -189,7 +189,7 @@ def _tray(root: mujoco.MjsBody) -> None:
       size = np.abs(out) * top / 2 + np.abs(along) * length + up * THICK
       _box(rim_body, f"tray_top_{side}", center, size, gray, group=2)
     # The slope: down and in from the top's inner edge, carried a further THICK below the
-    # floor so the two meet without a seam; its normal points up and into the tray.
+    # floor so the two meet without a seam. Its normal points up and into the tray.
     down = -out * np.cos(angle) - up * np.sin(angle)
     normal = up * np.cos(angle) - out * np.sin(angle)
     start = out * (edge - top) + up * lip
@@ -356,7 +356,7 @@ def brick(name: str, color: str, at: tuple[float, float, float]) -> mujoco.MjSpe
 
 def spec(colors: tuple[str, ...], swapped: bool = False) -> mujoco.MjSpec:
   """The fixtures and a brick of each of ``colors``, parked in its own bin.
-  ``swapped`` draws every brick and bin card in the other color; physics and
+  ``swapped`` draws every brick and bin card in the other color. Physics and
   scoring keep each brick's own, so the brick drawn blue belongs in the bin
   that wears the blue card."""
   other = dict(zip(scene.COLORS, scene.COLORS[::-1], strict=True))

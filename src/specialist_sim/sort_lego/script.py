@@ -3,7 +3,7 @@ time, taken from above, carried and let go over the bin of its color.
 
 A grasp is the operator's at the 0927 takes: fingers along the brick's long
 side, pitched ``PITCH`` down. With two hands, the left takes blue and the right
-red, turn by turn; the highest brick goes first, then the nearest. A brick not
+red, turn by turn. The highest brick goes first, then the nearest. A brick not
 held once lifted is tried again, ``ATTEMPTS`` times in all. The script reads
 every brick's pose off the scene, which no policy is given.
 """

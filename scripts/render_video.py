@@ -6,7 +6,7 @@ recorded states at 30 Hz.
     --out videos/drop_200003.mp4
 
 The lenses are the whole 720 px frame halved, not the views a policy crops
-from it; the overview is MuJoCo's own renderer looking at the tray from the
+from it. The overview is MuJoCo's own renderer looking at the tray from the
 operator's side. It needs ``ffmpeg`` and a GPU.
 """
 

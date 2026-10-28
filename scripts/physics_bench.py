@@ -1,6 +1,6 @@
 """What a physics setting costs and what it buys, on the LEGO sorting scene:
 speed against real time, and how the bricks and the grasp behave. Each
-candidate is a step length and a ``physics.Physics``; every scenario runs on
+candidate is a step length and a ``physics.Physics``. Every scenario runs on
 fixed seeds.
 
   uv run python scripts/physics_bench.py                       # every candidate below
@@ -18,10 +18,10 @@ fixed seeds.
   How fast the fastest creeps over the last second, how deep they sink into one
   another and the tray, and the fastest any brick moves.
 * spin: a brick turning at 25 rad/s in free flight, about what the takes'
-  tossed bricks turn at. How much of its spin is left 50 ms later; air leaves
+  tossed bricks turn at. How much of its spin is left 50 ms later. Air leaves
   nearly all.
 * land: a brick let go tilted 6 cm over a bin, moving 0.5 m/s. The fastest it
-  turns in the 150 ms after it touches down; the footage has ~25 rad/s.
+  turns in the 150 ms after it touches down. The footage has ~25 rad/s.
 * task: the scripted policy on single trays, right hand. How many bricks it
   sorts.
 """
