@@ -64,7 +64,7 @@ def test_a_drop_lays_one_to_eight_bricks_none_inside_another() -> None:
   for seed in range(60):
     layout = initial.draw("drop", seed, COLORS)
     counts.add(int(layout.active.sum()))
-    env._lay(0, layout, initial.starts(SLOTS))
+    env.place(0, layout.poses, initial.starts(SLOTS))
     mujoco.mj_forward(model, data)
     for contact in data.contact[: data.ncon]:
       one, other = contact.geom

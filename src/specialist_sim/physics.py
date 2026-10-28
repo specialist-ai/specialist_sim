@@ -29,8 +29,7 @@ INTEGRATORS = {
 @dataclass(frozen=True)
 class Physics:
   integrator: str = "implicitfast"
-  """Restores a free body's gyroscopic terms: lightly damped objects creep
-  15 times less than with Euler."""
+  """MuJoCo's recommendation for stability: implicit in the damping."""
   iterations: int = 100
   tolerance: float = 1e-8
   noslip_iterations: int = 0

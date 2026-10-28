@@ -152,7 +152,7 @@ class SortLegoEnv:
           break
         layout = initial.draw(cfg.mode, seed + tries, cfg.colors, cfg.bricks)
       self.layouts[env_idx] = layout
-      self._lay(env_idx, layout, start)
+      self.place(env_idx, layout.poses, start)
     self.rig.settle(chosen, initial.SETTLE[cfg.mode])
     lenses = len(self.rig.lenses)
     observation = self.rig.begin(chosen, np.zeros((len(chosen), lenses)))
@@ -194,17 +194,18 @@ class SortLegoEnv:
       "physics": cfg.physics.as_dict(),
     }
 
-  def _lay(self, env_idx: int, layout: Layout, hands: Float64Array) -> None:
-    """Stand the hands and the bricks in one env, from rest."""
+  def place(self, env_idx: int, bricks: Float64Array, hands: Float64Array) -> None:
+    """Stand every brick, ``(k, 7)``, and every hand, ``(hands, 8)``, in one env_idx,
+    from rest. ``rig.begin`` opens an episode there."""
     self.rig.place(env_idx, hands)
     qpos = self.rig.datas[env_idx].qpos
-    for at, pose in zip(self._brick_q, layout.poses, strict=True):
+    for at, pose in zip(self._brick_q, bricks, strict=True):
       qpos[at : at + 7] = pose
 
   def _overlaps(self, env_idx: int, layout: Layout, hands: Float64Array) -> bool:
     """Whether a hand at ``hands`` comes within ``CLEARANCE`` of a brick where
     ``layout`` puts it."""
-    self._lay(env_idx, layout, hands)
+    self.place(env_idx, layout.poses, hands)
     model, data = self.rig.model, self.rig.datas[env_idx]
     mujoco.mj_forward(model, data)
     for contact in data.contact[: data.ncon]:

@@ -21,7 +21,7 @@ from specialist_sim.sort_lego import initial, scene, task
 from specialist_sim.sort_lego.assets import GRASP
 from specialist_sim.sort_lego.env import SortLegoEnv
 
-__all__ = ["ATTEMPTS", "Script", "scripted_policy"]
+__all__ = ["ATTEMPTS", "Script", "drop_pose", "grasp_pose", "held", "scripted_policy"]
 
 PITCH = np.radians(48.0)
 """The fingers below the horizontal at a grasp: the 0927 grasps lie between 42
@@ -138,7 +138,7 @@ class Script:
         going_home, goal=pose[hand, :3].copy(), opening=float(pose[hand, 7])
       )
     brick = self._brick
-    grasp = _grasp(bricks[brick], slot)
+    grasp = grasp_pose(bricks[brick], slot)
     facing = rotation.to_matrix(grasp[3:7])
     if stage.name == "over":
       return Waypoint(grasp[:3] + np.array([0.0, 0.0, ABOVE]), OPEN, facing, bulge=0.02)
@@ -148,18 +148,18 @@ class Script:
       return Waypoint(grasp[:3], SHUT, facing)
     if stage.name == "lift":
       return Waypoint(pose[hand, :3] + np.array([0.0, 0.0, LIFT]), SHUT, facing)
-    held = _held(hands[hand], bricks[brick])
+    holding = held(hands[hand], bricks[brick])
     if stage.name == "carry":
-      if not held:
+      if not holding:
         return going_home
-      drop = _drop(self.colors[brick])
+      drop = drop_pose(self.colors[brick])
       return Waypoint(drop[:3], SHUT, rotation.to_matrix(drop[3:7]), bulge=ARCH)
     if stage.name == "release":
       return Waypoint(pose[hand, :3].copy(), OPEN, rotation.to_matrix(pose[hand, 3:7]))
     return going_home
 
 
-def _grasp(brick: Float64Array, slot: str) -> Float64Array:
+def grasp_pose(brick: Float64Array, slot: str) -> Float64Array:
   """The hand state that holds ``brick`` ``(7,)`` between its pads, ``(7,)``:
   fingers along its long side, pointing away from the hand's home."""
   long_side = rotation.to_matrix(brick[3:7])[:, 0]
@@ -173,7 +173,7 @@ def _grasp(brick: Float64Array, slot: str) -> Float64Array:
   return np.array([*position, *quaternion])
 
 
-def _drop(color: str) -> Float64Array:
+def drop_pose(color: str) -> Float64Array:
   """The hand state that holds a brick ``DROP`` over the middle of ``color``'s
   bin, fingers pitched down toward the bins, ``(7,)``."""
   middle = scene.bin_center(color) + np.array([0.0, 0.0, scene.BIN_SIZE[2] + DROP])
@@ -183,7 +183,7 @@ def _drop(color: str) -> Float64Array:
   )
 
 
-def _held(hand: Float64Array, brick: Float64Array) -> bool:
+def held(hand: Float64Array, brick: Float64Array) -> bool:
   """Whether ``brick`` lies between the pads of a hand standing at ``hand``."""
   grasp = hand[:3] + rotation.rotate(hand[3:7], np.asarray(GRASP))
   return bool(np.linalg.norm(grasp - brick[:3]) < HELD)
