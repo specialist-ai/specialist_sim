@@ -1,24 +1,24 @@
 """The pick-and-place demonstration: does it finish the task, and does it
-answer to the scene rather than to a clock."""
+answer to the env rather than to a clock."""
 
 import numpy as np
 import pytest
 
-from specialist_sim.expert import Expert, ExpertCfg
-from specialist_sim.pickplace import Cfg, PickPlace, Report
-from specialist_sim.pickplace.script import STAGES, expert
-from specialist_sim.trajectory import HORIZON
+from specialist_sim.action import CHUNK_SIZE
+from specialist_sim.pickplace import Cfg, PickPlaceEnv, Report
+from specialist_sim.pickplace.script import STAGES, scripted_policy
+from specialist_sim.scripted import ScriptedPolicy, ScriptedPolicyCfg
 
-ONCE = ExpertCfg(length=(0.0, 0.0))
+ONCE = ScriptedPolicyCfg(length=(0.0, 0.0))
 """One cycle, which is all a test needs to watch."""
 
 
-def _run(seed: int, steps: int = 400) -> tuple[PickPlace, Expert, Report]:
-  env = PickPlace(Cfg(image_size=32))
+def _run(seed: int, steps: int = 400) -> tuple[PickPlaceEnv, ScriptedPolicy, Report]:
+  env = PickPlaceEnv(Cfg(image_size=32))
   observation, report = env.reset([seed])
-  demonstrator = expert(env, np.random.default_rng(seed), ONCE)
+  demonstrator = scripted_policy(env, np.random.default_rng(seed), ONCE)
   for _ in range(steps):
-    action = demonstrator.act(observation.state[0, -1], report.cube[0])
+    action = demonstrator.predict_action_chunk(observation.state[0, -1], report.cube[0])
     observation, report = env.step(action[None])
     if demonstrator.done:
       break
@@ -39,9 +39,9 @@ def test_the_demonstration_puts_the_cube_on_the_tape(seed: int) -> None:
 
 def test_the_kick_sweeps_the_cube_off_the_tape() -> None:
   """The perturbation is the point: the pick is given something to solve."""
-  env = PickPlace(Cfg(image_size=32))
+  env = PickPlaceEnv(Cfg(image_size=32))
   observation, report = env.reset([1])
-  demonstrator = expert(env, np.random.default_rng(1), ONCE)
+  demonstrator = scripted_policy(env, np.random.default_rng(1), ONCE)
   start = report.cube[0].copy()
   scattered = None
   for _ in range(400):
@@ -49,7 +49,7 @@ def test_the_kick_sweeps_the_cube_off_the_tape() -> None:
       break
     if scattered is None and STAGES[demonstrator.stage].name == "reach":
       scattered = report.cube[0].copy()
-    action = demonstrator.act(observation.state[0, -1], report.cube[0])
+    action = demonstrator.predict_action_chunk(observation.state[0, -1], report.cube[0])
     observation, report = env.step(action[None])
   assert scattered is not None, "the demonstration never reached the pick"
   began = float(np.hypot(*(start[:2] - env.room.tape)))
@@ -61,30 +61,32 @@ def test_the_kick_sweeps_the_cube_off_the_tape() -> None:
 def test_a_demonstration_commands_a_continuous_trajectory() -> None:
   """A trajectory without jumps, turning through unit quaternions, walking no
   faster than the speed it is given."""
-  env = PickPlace(Cfg(image_size=32))
+  env = PickPlaceEnv(Cfg(image_size=32))
   observation, report = env.reset([2])
-  demonstrator = expert(env, np.random.default_rng(2), ONCE)
+  demonstrator = scripted_policy(env, np.random.default_rng(2), ONCE)
   last = None
   for _ in range(40):
-    action = demonstrator.act(observation.state[0, -1], report.cube[0])
-    assert action.shape == (HORIZON, 2, 8)
+    action = demonstrator.predict_action_chunk(observation.state[0, -1], report.cube[0])
+    assert action.shape == (CHUNK_SIZE, 2, 8)
     assert np.allclose(np.linalg.norm(action[:, :, 3:7], axis=-1), 1.0, atol=1e-9)
     stride = np.linalg.norm(np.diff(action[:, :, :3], axis=0), axis=-1)
-    assert (stride <= ONCE.speed * demonstrator.period + 1e-9).all()
+    assert (stride <= ONCE.speed * demonstrator.action_dt + 1e-9).all()
     if last is not None:
-      step = action[0, :, :3] - last[demonstrator.tracked - 1, :, :3]
+      step = action[0, :, :3] - last[demonstrator.n_action_steps - 1, :, :3]
       assert np.linalg.norm(step, axis=-1).max() < 0.05, "the trajectory jumped"
     last = action.copy()
     observation, report = env.step(action[None])
 
 
 def test_an_episode_repeats_the_cycle_until_its_span_is_up() -> None:
-  env = PickPlace(Cfg(image_size=32))
+  env = PickPlaceEnv(Cfg(image_size=32))
   observation, report = env.reset([5])
-  demonstrator = expert(env, np.random.default_rng(5), ExpertCfg(length=(12.0, 12.0)))
+  demonstrator = scripted_policy(
+    env, np.random.default_rng(5), ScriptedPolicyCfg(length=(12.0, 12.0))
+  )
   steps = 0
   while not demonstrator.done and steps < 400:
-    action = demonstrator.act(observation.state[0, -1], report.cube[0])
+    action = demonstrator.predict_action_chunk(observation.state[0, -1], report.cube[0])
     observation, report = env.step(action[None])
     steps += 1
   assert demonstrator.done, (

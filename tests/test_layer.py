@@ -20,17 +20,19 @@ from specialist_sim.dataset.layer import (  # noqa: E402
   record,
   write,
 )
-from specialist_sim.expert import ExpertCfg  # noqa: E402
-from specialist_sim.pickplace import Cfg, PickPlace  # noqa: E402
-from specialist_sim.pickplace.script import expert  # noqa: E402
+from specialist_sim.pickplace import Cfg, PickPlaceEnv  # noqa: E402
+from specialist_sim.pickplace.script import scripted_policy  # noqa: E402
+from specialist_sim.scripted import ScriptedPolicyCfg  # noqa: E402
 
 ROOT_HALF = np.sqrt(0.5)
 """A quarter turn about the vertical, as either convention spells its halves."""
 
 
-def _episode(steps: int) -> tuple[PickPlace, Episode]:
-  env = PickPlace(Cfg(image_size=32))
-  demonstrator = expert(env, np.random.default_rng(0), ExpertCfg(length=(0.0, 0.0)))
+def _episode(steps: int) -> tuple[PickPlaceEnv, Episode]:
+  env = PickPlaceEnv(Cfg(image_size=32))
+  demonstrator = scripted_policy(
+    env, np.random.default_rng(0), ScriptedPolicyCfg(length=(0.0, 0.0))
+  )
   return env, record(env, demonstrator, seed=0, max_steps=steps)[0]
 
 

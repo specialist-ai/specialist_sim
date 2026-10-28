@@ -1,4 +1,4 @@
-"""The tracer draws the world the way the lens model projects it."""
+"""The tracer draws the scene the way the lens model projects it."""
 
 from typing import Any
 
@@ -6,12 +6,12 @@ import mujoco
 import numpy as np
 import pytest
 
+from scene import bare
 from specialist_sim import rotation
 from specialist_sim.camera import NOMINAL, Camera, Mei, project
 from specialist_sim.embodiment import Floating
 from specialist_sim.gripper import SLOTS, Hand
 from specialist_sim.render import HOUSING, Renderer, parts
-from world import bare
 
 STANDING = np.array(
   [
@@ -87,7 +87,7 @@ def test_a_lens_cannot_see_the_part_it_looks_out_of(stood: Any) -> None:
 
 
 def test_a_body_lands_on_the_pixel_the_lens_projects_it_to(stood: Any) -> None:
-  """The render and the projection agree about where the world is."""
+  """The render and the projection agree about where the scene is."""
   model, hands, data = stood
   down = rotation.from_matrix(
     np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
@@ -178,7 +178,7 @@ def test_a_textured_box_reads_its_map() -> None:
   assert (black | white).mean() > 0.9, "the checker is two colors, blended at the edges"
 
 
-def test_a_world_without_lights_is_lit_by_nothing_but_its_ambient() -> None:
+def test_a_scene_without_lights_is_lit_by_nothing_but_its_ambient() -> None:
   dark = mujoco.MjModel.from_xml_string(
     '<mujoco><worldbody><geom type="box" size="1 1 0.1" pos="0 0 -1" group="1"/></worldbody></mujoco>'
   )

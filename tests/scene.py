@@ -1,4 +1,4 @@
-"""A bare world for the rig's own tests: a lit slab far below the hands, and
+"""A bare scene for the rig's own tests: a lit slab far below the hands, and
 nothing else."""
 
 import mujoco

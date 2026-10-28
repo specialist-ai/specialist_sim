@@ -1,4 +1,4 @@
-"""The room the recordings were made in, and what a scene reads off it: the
+"""The room the recordings were made in, and what an env reads off it: the
 table, the tape target, the cube, and how a hand takes hold of the cube."""
 
 from __future__ import annotations

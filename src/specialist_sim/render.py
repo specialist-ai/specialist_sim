@@ -262,8 +262,8 @@ class Renderer:
       self.lenses if names is None else {name: self.lenses[name] for name in names}
     )
     for name, lens in wanted.items():
-      carrier = data.xmat[lens.body].reshape(3, 3)
-      origin = data.xpos[lens.body] + carrier @ lens.pos
+      mount = data.xmat[lens.body].reshape(3, 3)
+      origin = data.xpos[lens.body] + mount @ lens.pos
       wp.launch(
         kernels.trace,
         dim=len(lens.pixel),
@@ -273,7 +273,7 @@ class Renderer:
           self.rotation,
           lens.seen,
           wp.vec3(*origin),
-          wp.mat33(*(carrier @ lens.rotation).ravel()),
+          wp.mat33(*(mount @ lens.rotation).ravel()),
           lens.bearings,
           lens.pixel,
           self.albedo,

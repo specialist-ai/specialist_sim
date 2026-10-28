@@ -1,4 +1,4 @@
-"""The pick-and-place room: what stands in it, and what the scene reads off it."""
+"""The pick-and-place room: what stands in it, and what the env reads off it."""
 
 import mujoco
 import numpy as np
@@ -8,7 +8,7 @@ from specialist_sim import gripper, rotation
 from specialist_sim.camera import Camera
 from specialist_sim.embodiment import Embodiment
 from specialist_sim.gripper import SLOTS
-from specialist_sim.pickplace import Cfg, PickPlace
+from specialist_sim.pickplace import Cfg, PickPlaceEnv
 from specialist_sim.pickplace.room import SCENE_VIEW
 from specialist_sim.render import Renderer
 
@@ -16,7 +16,7 @@ from specialist_sim.render import Renderer
 def test_the_room_stands_the_hands_at_a_table_with_a_cube(
   embodiment: Embodiment,
 ) -> None:
-  env = PickPlace(Cfg(embodiment=embodiment, image_size=32))
+  env = PickPlaceEnv(Cfg(embodiment=embodiment, image_size=32))
   room = env.room
   assert env.rig.slots == SLOTS
   assert room.cube.rest > room.table_top
@@ -32,7 +32,7 @@ def test_the_room_stands_the_hands_at_a_table_with_a_cube(
 
 
 def test_the_scene_view_watches_the_table() -> None:
-  env = PickPlace(Cfg(image_size=32))
+  env = PickPlaceEnv(Cfg(image_size=32))
   env.reset([0])
   view = Renderer(env.rig.model, {"room": (0, SCENE_VIEW)}, 96).render(
     env.rig.datas[0]
@@ -43,7 +43,7 @@ def test_the_scene_view_watches_the_table() -> None:
 
 
 def test_the_surfaces_carry_their_maps() -> None:
-  env = PickPlace(Cfg(image_size=32))
+  env = PickPlaceEnv(Cfg(image_size=32))
   model = env.rig.model
   mapped = {
     model.geom(part.geom).name
@@ -54,9 +54,9 @@ def test_the_surfaces_carry_their_maps() -> None:
 
 
 def test_the_fiducials_stand_in_the_room_only_when_asked() -> None:
-  bare = PickPlace(Cfg(image_size=32))
+  bare = PickPlaceEnv(Cfg(image_size=32))
   assert mujoco.mj_name2id(bare.rig.model, mujoco.mjtObj.mjOBJ_BODY, "tag_0") < 0
-  env = PickPlace(Cfg(image_size=32, fiducials=True))
+  env = PickPlaceEnv(Cfg(image_size=32, fiducials=True))
   env.reset([3])
   ahead = rotation.from_matrix(
     np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])

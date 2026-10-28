@@ -1,5 +1,6 @@
-"""What carries the hands: how they stand in the room, how one is put at a
-pose, and how they are driven along the ramp every physics step.
+"""The embodiment that carries the hands: how they stand in the scene, how
+one is put at a pose, and how they are driven along the interpolated setpoints
+every physics step.
 """
 
 from __future__ import annotations
@@ -16,21 +17,21 @@ from specialist_sim.arrays import Float64Array
 from specialist_sim.gripper import SLOTS, Hand
 
 if TYPE_CHECKING:
-  from specialist_sim.trajectory import Ramp
+  from specialist_sim.action import Interpolator
 
 __all__ = ["Embodiment", "Floating", "OutOfReach"]
 
 
 class OutOfReach(ValueError):
-  """A pose the carrier cannot put a hand at."""
+  """A pose the embodiment cannot put a hand at."""
 
 
 class Embodiment(Protocol):
   slots: tuple[str, ...]
   """The hands it stands up, in the order their states are laid out."""
 
-  def attach(self, room: mujoco.MjSpec) -> None:
-    """Stand the hands in the room, every body of a hand prefixed ``{slot}_``."""
+  def attach(self, scene: mujoco.MjSpec) -> None:
+    """Stand the hands in the scene, every body of a hand prefixed ``{slot}_``."""
     ...
 
   def bind(self, model: mujoco.MjModel) -> tuple[Hand, ...]:
@@ -42,21 +43,21 @@ class Embodiment(Protocol):
     raise ``OutOfReach``."""
     ...
 
-  def reset(self, worlds: Sequence[int], qpos: Float64Array) -> None:
-    """Take up the named worlds where their scenes put them; ``qpos`` is
-    every world's, ``(worlds, nq)``."""
+  def reset(self, env_ids: Sequence[int], qpos: Float64Array) -> None:
+    """Take up the named envs where their reset put them; ``qpos`` is
+    every env's, ``(num_envs, nq)``."""
     ...
 
   def command(
     self,
-    ramp: Ramp,
+    interpolator: Interpolator,
     substep: int,
     qpos: Float64Array,
     ctrl: Float64Array,
     xfrc: Float64Array,
   ) -> None:
-    """Write what every world wants for one substep of the ramp: ``ctrl`` is
-    ``(worlds, nu)`` and ``xfrc`` ``(worlds, nbody, 6)``."""
+    """Write what every env wants for one substep of the interpolation: ``ctrl``
+    is ``(num_envs, nu)`` and ``xfrc`` ``(num_envs, nbody, 6)``."""
     ...
 
 
@@ -67,8 +68,9 @@ RIG_INERTIA = 1e-9
 
 @dataclass
 class Floating:
-  """Grippers hanging on free joints, each pulled along the ramp by a stiff
-  impedance with the leg's velocity fed forward, and held up against gravity."""
+  """Grippers hanging on free joints, each pulled along the interpolated
+  setpoints by a stiff impedance with the segment's velocity fed forward, and
+  held up against gravity."""
 
   slots: tuple[str, ...] = SLOTS
   stiffness: float = 4000.0
@@ -79,12 +81,12 @@ class Floating:
   turn: float = 10.0
   """The fastest the feedforward asks a rig to go, in meters and radians a second."""
 
-  def attach(self, room: mujoco.MjSpec) -> None:
+  def attach(self, scene: mujoco.MjSpec) -> None:
     for slot in self.slots:
-      rig = room.worldbody.add_body(name=f"{slot}_rig")
+      rig = scene.worldbody.add_body(name=f"{slot}_rig")
       rig.add_freejoint(name=f"{slot}_rig")
       rig.mass, rig.inertia = RIG_MASS, [RIG_INERTIA] * 3
-      room.attach(gripper.spec(), prefix=f"{slot}_", frame=rig.add_frame())
+      scene.attach(gripper.spec(), prefix=f"{slot}_", frame=rig.add_frame())
 
   def bind(self, model: mujoco.MjModel) -> tuple[Hand, ...]:
     hands = tuple(gripper.bind(model, slot) for slot in self.slots)
@@ -105,12 +107,12 @@ class Floating:
     at = self._position[hand, 0]
     data.qpos[at : at + 7] = pose
 
-  def reset(self, worlds: Sequence[int], qpos: Float64Array) -> None:
+  def reset(self, env_ids: Sequence[int], qpos: Float64Array) -> None:
     """A wrench carries no state between steps."""
 
   def command(
     self,
-    ramp: Ramp,
+    interpolator: Interpolator,
     substep: int,
     qpos: Float64Array,
     ctrl: Float64Array,
@@ -119,23 +121,23 @@ class Floating:
     here, facing = qpos[:, self._position], qpos[:, self._quaternion]
     twist = np.concatenate(
       [
-        _capped(ramp.twist[:, substep, :, :3], self.speed),
-        _capped(ramp.twist[:, substep, :, 3:], self.turn),
+        _capped(interpolator.twist[:, substep, :, :3], self.speed),
+        _capped(interpolator.twist[:, substep, :, 3:], self.turn),
       ],
       axis=-1,
     )
     apart = rotation.log(
-      rotation.multiply(ramp.quaternion[:, substep], rotation.conjugate(facing))
+      rotation.multiply(interpolator.quaternion[:, substep], rotation.conjugate(facing))
     )
     xfrc[:, self._carried, :3] = self._weight
     xfrc[:, self._rigs, :3] += (
-      self.stiffness * (ramp.position[:, substep] - here)
+      self.stiffness * (interpolator.position[:, substep] - here)
       + self._damping[:, :3] * twist[..., :3]
     )
     xfrc[:, self._rigs, 3:] = (
       self.rotational_stiffness * apart + self._damping[:, 3:] * twist[..., 3:]
     )
-    gripper.grip(ctrl, self._servos, ramp.opening[:, substep])
+    gripper.grip(ctrl, self._servos, interpolator.opening[:, substep])
 
 
 def _capped(vectors: Float64Array, limit: float) -> Float64Array:

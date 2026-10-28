@@ -20,9 +20,9 @@ from specialist_corpus import schema
 
 from specialist_sim.arrays import Float64Array, Int64Array, UInt8Array
 from specialist_sim.camera import NOMINAL
-from specialist_sim.expert import Expert
-from specialist_sim.pickplace import PickPlace, Report
+from specialist_sim.pickplace import PickPlaceEnv, Report
 from specialist_sim.pickplace.room import ASSETS
+from specialist_sim.scripted import ScriptedPolicy
 
 __all__ = [
   "CUBE_POSE",
@@ -44,7 +44,7 @@ SLOTS = tuple(f"cam{index:02d}" for index in range(len(schema.HANDS)))
 """The handle a capture gives each camera, which a layer names its hands by."""
 
 CUBE_POSE = f"{schema.STATE}/cube/pose"
-"""Where the cube's pose is written; only a simulated scene knows what the
+"""Where the cube's pose is written; only a simulated env knows what the
 hands are acting on."""
 
 
@@ -71,7 +71,7 @@ class Episode:
 
 
 def record(
-  env: PickPlace, expert: Expert, seed: int, max_steps: int
+  env: PickPlaceEnv, policy: ScriptedPolicy, seed: int, max_steps: int
 ) -> tuple[Episode, Report]:
   """Drive one episode until the demonstration is finished, keeping what a
   state layer holds. Every hand carries a lens, as a capture's does."""
@@ -79,7 +79,7 @@ def record(
   episode = Episode(1.0 / clock.row_dt)
   observation, report = env.reset([seed])
   for _ in range(max_steps):
-    action = expert.act(observation.state[0, -1], report.cube[0])
+    action = policy.predict_action_chunk(observation.state[0, -1], report.cube[0])
     observation, report = env.step(action[None])
     states = rig.state_rows[0]
     twists = rig.twists(rig.qpos_rows[0], rig.qvel_rows[0])
@@ -95,7 +95,7 @@ def record(
       for frame in rig.exposed[0][slot]:
         episode.frame_times[name].append(frame.at * clock.row_dt)
         episode.frames[name].append(encode(frame.image))
-    if expert.done or report.dropped[0]:
+    if policy.done or report.dropped[0]:
       break
   paired = min(len(episode.frames[name]) for name in schema.HANDS)
   for name in schema.HANDS:

@@ -9,13 +9,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from specialist_sim.arrays import Float64Array
-from specialist_sim.expert import Aim, Expert, ExpertCfg, Stage
 from specialist_sim.gripper import OPEN, SHUT, SLOTS
-from specialist_sim.pickplace.env import PickPlace
+from specialist_sim.pickplace.env import PickPlaceEnv
 from specialist_sim.pickplace.room import Room
 from specialist_sim.pickplace.task import HOME_ROTATION, home, on_tape
+from specialist_sim.scripted import ScriptedPolicy, ScriptedPolicyCfg, Stage, Waypoint
 
-__all__ = ["KICK", "PICK", "STAGES", "Rules", "Script", "expert"]
+__all__ = ["KICK", "PICK", "STAGES", "Rules", "Script", "scripted_policy"]
 
 KICK, PICK = 0, 1
 """The hand that sweeps the cube off the tape, and the hand that puts it back."""
@@ -121,9 +121,9 @@ class Script:
       )
     return None
 
-  def aim(
+  def waypoint(
     self, stage: Stage, hands: Float64Array, pose: Float64Array, cube: Float64Array
-  ) -> Aim:
+  ) -> Waypoint:
     """Where this stage sends the hand, how open it holds it, and how it
     travels; a hand turns only while it is going somewhere."""
     rules, hand = self.rules, stage.hand
@@ -150,7 +150,7 @@ class Script:
     else:
       goal, opening = hands[hand, :3].copy(), rules.clear
     goal = np.clip(goal, *self.reach)
-    return Aim(
+    return Waypoint(
       goal=goal,
       opening=opening,
       facing=facing,
@@ -242,18 +242,18 @@ class Script:
     return over
 
 
-def expert(
-  env: PickPlace,
+def scripted_policy(
+  env: PickPlaceEnv,
   rng: np.random.Generator,
-  cfg: ExpertCfg | None = None,
+  cfg: ScriptedPolicyCfg | None = None,
   rules: Rules | None = None,
-) -> Expert:
-  """A demonstrator for the environment, drawing from ``rng``; it reads the
-  cube's position as its world."""
-  return Expert(
+) -> ScriptedPolicy:
+  """A scripted policy for the env, drawing from ``rng``; it reads the
+  cube's position as its env state."""
+  return ScriptedPolicy(
     Script(env.room, rng, rules),
     rng,
-    env.cfg.clock.pose_dt,
-    env.rig.cfg.clock.tracked,
+    env.cfg.clock.action_dt,
+    env.rig.cfg.clock.n_action_steps,
     cfg,
   )

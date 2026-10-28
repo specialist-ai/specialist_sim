@@ -4,10 +4,11 @@ from dataclasses import replace
 
 import numpy as np
 
+from specialist_sim.action import hold
 from specialist_sim.camera import NOMINAL
 from specialist_sim.embodiment import Embodiment
 from specialist_sim.gripper import SLOTS
-from specialist_sim.pickplace import Cfg, PickPlace
+from specialist_sim.pickplace import Cfg, PickPlaceEnv
 from specialist_sim.pickplace.task import (
   BIMANUAL,
   Fixed,
@@ -17,7 +18,6 @@ from specialist_sim.pickplace.task import (
   left_task,
   right_task,
 )
-from specialist_sim.trajectory import hold
 
 PATCH = Region(vertices=((0.50, -0.14), (0.82, -0.14), (0.82, 0.10), (0.50, 0.10)))
 """A patch of table, off the tape on the right hand's side and beyond."""
@@ -29,8 +29,10 @@ def test_a_one_hand_task_reproduces_the_two_hand_run_that_held_the_other(
 ) -> None:
   """Driving the right hand alone, with the env holding the left where it was
   sent, is bitwise the run that drove both and asked the left to stay."""
-  both = PickPlace(replace(SMALL, embodiment=embodiment, task=Task(SLOTS, Home(PATCH))))
-  right = PickPlace(
+  both = PickPlaceEnv(
+    replace(SMALL, embodiment=embodiment, task=Task(SLOTS, Home(PATCH)))
+  )
+  right = PickPlaceEnv(
     replace(SMALL, embodiment=type(embodiment)(), task=right_task(PATCH))
   )
   two, _ = both.reset([11])
@@ -53,7 +55,7 @@ def test_a_one_hand_task_reproduces_the_two_hand_run_that_held_the_other(
 def test_the_idle_hand_stays_in_the_air_and_in_the_picture(
   embodiment: Embodiment,
 ) -> None:
-  env = PickPlace(replace(SMALL, embodiment=embodiment, task=right_task(PATCH)))
+  env = PickPlaceEnv(replace(SMALL, embodiment=embodiment, task=right_task(PATCH)))
   observation, _ = env.reset([3])
   assert observation.state.shape[2] == 1 and observation.image.shape[1] == 1
   left = env.rig.hands[0]
@@ -76,7 +78,7 @@ def test_the_idle_hand_stays_in_the_air_and_in_the_picture(
 
 
 def test_the_idle_hand_returns_to_where_it_was_sent_after_a_bump() -> None:
-  env = PickPlace(replace(SMALL, task=right_task(PATCH)))
+  env = PickPlaceEnv(replace(SMALL, task=right_task(PATCH)))
   observation, _ = env.reset([5])
   sent = env.rig.states(env.rig.datas[0].qpos[None])[0, 0]
   bumped = sent.copy()
@@ -91,13 +93,15 @@ def test_the_idle_hand_returns_to_where_it_was_sent_after_a_bump() -> None:
 
 
 def test_a_kick_succeeds_when_the_cube_rests_in_the_picking_region() -> None:
-  env = PickPlace(replace(SMALL, task=left_task(PATCH)))
+  env = PickPlaceEnv(replace(SMALL, task=left_task(PATCH)))
   observation, report = env.reset([0])
   assert report.on_tape[0]
   hands = env.rig.states(env.rig.datas[0].qpos[None])[0]
   spot = np.array([0.75, -0.05])
   assert PATCH.contains(spot) and not PATCH.contains(np.array([0.40, 0.0]))
-  observation, report = env.reset([0], start=Fixed(hands, np.array([*spot, 0.0])))
+  observation, report = env.reset(
+    [0], initial_condition=Fixed(hands, np.array([*spot, 0.0]))
+  )
   assert not report.on_tape[0]
   for _ in range(8):
     observation, report = env.step(hold(observation.state[0, -1])[None])
@@ -110,32 +114,38 @@ def test_a_kick_succeeds_when_the_cube_rests_in_the_picking_region() -> None:
   assert not report.success[0], "a cube left on the tape is no kick"
 
 
-def test_a_kicked_start_opens_the_episode_at_the_pick() -> None:
-  env = PickPlace(replace(SMALL, task=Task(SLOTS, Home(PATCH))))
+def test_a_kicked_initial_condition_opens_the_episode_at_the_pick() -> None:
+  env = PickPlaceEnv(replace(SMALL, task=Task(SLOTS, Home(PATCH))))
   _, report = env.reset([0])
   assert not report.on_tape[0] and report.displaced[0]
   assert PATCH.contains(report.cube[0, :2])
   _, again = env.reset([0])
-  assert np.array_equal(report.cube, again.cube), "a seed names one start"
+  assert np.array_equal(report.cube, again.cube), "a seed names one initial condition"
   assert BIMANUAL.driven == SLOTS
 
 
-def test_a_scene_hands_over_a_frame_as_old_as_it_asks_for() -> None:
+def test_an_env_hands_over_a_frame_as_old_as_it_asks_for() -> None:
   """A policy taught a delay is scored against one: the frame an observation
-  carries is at least the scene's lag behind the step it returns at."""
+  carries is at least the env's camera latency behind the step it returns at."""
   span = 1.0 / (NOMINAL.hz * SMALL.clock.row_dt)
-  for lag in (0.0, 0.12, 0.15, 0.18):
-    env = PickPlace(replace(SMALL, image_lag=lag))
+  for latency in (0.0, 0.12, 0.15, 0.18):
+    env = PickPlaceEnv(replace(SMALL, camera_latency=latency))
     observation, report = env.reset([0])
     for _ in range(3):
       observation, report = env.step(hold(observation.state[0, -1])[None])
-    age = observation.row[0, -1] - observation.image_row[0] - lag / SMALL.clock.row_dt
-    assert (age >= -0.5).all(), f"a lag of {lag}s delivered {age.tolist()}"
-    assert (age <= span + 0.5).all(), f"a lag of {lag}s delivered {age.tolist()}"
+    age = (
+      observation.row[0, -1] - observation.image_row[0] - latency / SMALL.clock.row_dt
+    )
+    assert (age >= -0.5).all(), f"a latency of {latency}s delivered {age.tolist()}"
+    assert (age <= span + 0.5).all(), (
+      f"a latency of {latency}s delivered {age.tolist()}"
+    )
 
 
 def test_a_task_may_see_a_lens_it_does_not_drive() -> None:
-  env = PickPlace(replace(SMALL, task=Task((SLOTS[1],), Home(PATCH), seen=(SLOTS[0],))))
+  env = PickPlaceEnv(
+    replace(SMALL, task=Task((SLOTS[1],), Home(PATCH), seen=(SLOTS[0],)))
+  )
   observation, _ = env.reset([0])
   assert observation.state.shape[2] == 1 and observation.image.shape[1] == 2
   assert env.rig.lenses == list(SLOTS) and env.rig.cfg.driven == (SLOTS[1],)

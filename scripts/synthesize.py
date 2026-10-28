@@ -15,8 +15,8 @@ from specialist_corpus import schema
 
 from specialist_sim.camera import NOMINAL
 from specialist_sim.dataset.layer import record, revision, scale, write
-from specialist_sim.pickplace import Cfg, PickPlace
-from specialist_sim.pickplace.script import expert
+from specialist_sim.pickplace import Cfg, PickPlaceEnv
+from specialist_sim.pickplace.script import scripted_policy
 from specialist_sim.pickplace.task import Placed
 
 
@@ -31,12 +31,12 @@ def main() -> None:
   args = parser.parse_args()
 
   sha = args.revision or revision()
-  env = PickPlace(Cfg(image_size=args.size))
+  env = PickPlaceEnv(Cfg(image_size=args.size))
   layer = schema.state_layer(scale(args.size), 1.0 / env.cfg.clock.row_dt)
   written, refused = 0, 0
   seed, last = args.seed, args.seed + 2 * args.episodes
   while written < args.episodes and seed < last:
-    demonstrator = expert(env, np.random.default_rng(seed))
+    demonstrator = scripted_policy(env, np.random.default_rng(seed))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     episode, report = record(env, demonstrator, seed, args.max_steps)
     if not (demonstrator.done and Placed().reached(report)[0]):

@@ -13,10 +13,10 @@ from specialist_corpus.poses import quats_to_matrices
 from specialist_corpus.read import Recording, read_anchors, read_lens
 
 from specialist_sim import rotation
+from specialist_sim.action import CHUNK_SIZE
 from specialist_sim.arrays import Float64Array, UInt8Array
 from specialist_sim.camera import Camera, Mei
 from specialist_sim.dataset.layer import SIDE, decoded
-from specialist_sim.trajectory import HORIZON
 
 __all__ = ["Take", "Track"]
 
@@ -91,10 +91,11 @@ class Take:
     """What one camera saw at a tick, as the policy is trained to see it."""
     return decoded(self.tracks[hand].frames[tick])
 
-  def trajectory(self, tick: int, tracked: int) -> Float64Array:
-    """What lands every gripper where the layer says it was at ``tick``,
-    ``(HORIZON, hands, 8)``, the first ``tracked`` of them leading up to it."""
-    ahead = (np.arange(1, HORIZON + 1) / tracked - 1.0) * self.period
+  def action_chunk(self, tick: int, n_action_steps: int) -> Float64Array:
+    """The action chunk that lands every gripper where the layer says it was at
+    ``tick``, ``(CHUNK_SIZE, hands, 8)``, the first ``n_action_steps`` of them
+    leading up to it."""
+    ahead = (np.arange(1, CHUNK_SIZE + 1) / n_action_steps - 1.0) * self.period
     return np.stack(
       [self.poses(track, track.ticks[tick] + ahead) for track in self.tracks], axis=1
     )
