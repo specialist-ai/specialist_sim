@@ -22,7 +22,7 @@ __all__ = [
   "Fixed",
   "Goal",
   "Home",
-  "Judgement",
+  "Judgment",
   "Placed",
   "Region",
   "RestingIn",
@@ -163,7 +163,7 @@ def on_tape(room: Room, position: Float64Array) -> BoolArray:
 
 
 @dataclass(frozen=True)
-class Judgement:
+class Judgment:
   """What every world's cube is doing, one entry per world."""
 
   cube: Float64Array
@@ -198,7 +198,7 @@ def look(room: Room, data: mujoco.MjData) -> tuple[Float64Array, bool, bool, boo
 
 
 class Goal(Protocol):
-  def reached(self, judgement: Judgement) -> BoolArray:
+  def reached(self, judgment: Judgment) -> BoolArray:
     """Which worlds' cubes are doing what the task asks."""
     ...
 
@@ -207,9 +207,9 @@ class Goal(Protocol):
 class Placed:
   """The cube back on the tape, at rest and let go of, having been off it."""
 
-  def reached(self, judgement: Judgement) -> BoolArray:
+  def reached(self, judgment: Judgment) -> BoolArray:
     out: BoolArray = (
-      judgement.displaced & judgement.on_tape & judgement.resting & ~judgement.held
+      judgment.displaced & judgment.on_tape & judgment.resting & ~judgment.held
     )
     return out
 
@@ -220,12 +220,12 @@ class RestingIn:
 
   region: Region
 
-  def reached(self, judgement: Judgement) -> BoolArray:
+  def reached(self, judgment: Judgment) -> BoolArray:
     out: BoolArray = (
-      judgement.resting
-      & ~judgement.on_tape
-      & ~judgement.held
-      & self.region.contains(judgement.cube[:, :2])
+      judgment.resting
+      & ~judgment.on_tape
+      & ~judgment.held
+      & self.region.contains(judgment.cube[:, :2])
     )
     return out
 

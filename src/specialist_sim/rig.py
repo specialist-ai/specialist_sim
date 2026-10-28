@@ -183,7 +183,7 @@ class Rig:
     """Whether MuJoCo could not carry the world since it began."""
     self.tracking = np.zeros(worlds)
     """The largest gap between a driven hand and its setpoint at the last
-    step's end, in metres."""
+    step's end, in meters."""
 
   def place(self, world: int, hands: Float64Array) -> None:
     """Start a world from rest with every hand where a state, ``(hands, 8)``,

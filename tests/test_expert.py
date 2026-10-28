@@ -57,7 +57,7 @@ def test_a_leg_lays_unit_quaternions_along_its_turn() -> None:
 
 
 class _Shuttle:
-  """A script with one stage: carry hand 1 ten centimetres out, then back."""
+  """A script with one stage: carry hand 1 ten centimeters out, then back."""
 
   stages = (Stage(1, "out"), Stage(1, "back", turns=False))
   reach = (np.full(3, -1.0), np.full(3, 1.0))

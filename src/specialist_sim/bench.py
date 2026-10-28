@@ -90,7 +90,7 @@ class Outcome:
   broke: bool
   tracking: float
   """The median over steps of the largest gap between a driven hand and its
-  setpoint, in metres."""
+  setpoint, in meters."""
   labels: Mapping[str, bool]
   """Every name the scene counts, and whether it held when the episode ended,
   so a report names the same rates whatever happened to run."""

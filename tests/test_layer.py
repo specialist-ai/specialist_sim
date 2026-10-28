@@ -82,7 +82,7 @@ def test_the_cube_pose_is_written_with_the_quaternion_the_dataset_reads() -> Non
 
 def test_a_written_layer_reads_back_as_what_was_recorded(tmp_path: Path) -> None:
   """A session reads back exactly as a capture does: hands and cube on the row
-  lattice, images on the camera's grid, each labelled by the row its shutter
+  lattice, images on the camera's grid, each labeled by the row its shutter
   fell on, both hands under one label."""
   env, episode = _episode(4)
   path = schema.layer_rrd(tmp_path, schema.state_layer(90, 100.0), "sim0000")

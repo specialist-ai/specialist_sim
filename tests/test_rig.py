@@ -261,7 +261,7 @@ def test_a_lens_fires_on_its_own_clock() -> None:
   assert drawn == len(rows) * len(rig.lenses), "a frame is drawn once, when exposed"
 
 
-def test_nothing_synchronises_one_lens_to_another_or_to_a_step() -> None:
+def test_nothing_synchronizes_one_lens_to_another_or_to_a_step() -> None:
   """Each lens stands where its phase puts it, so two lenses of one world sit
   apart and the same lens of two worlds does too."""
   rig = Rig(SMALL, worlds=2)

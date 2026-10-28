@@ -70,7 +70,7 @@ walks the commanded path at the physics rate with the velocity of the leg it
 is on, and a carrier chases it every physics step. `trajectory.hold` builds
 the trajectory that asks to stay put.
 
-Nothing synchronises a lens to any of this. Each fires at its own rate on the
+Nothing synchronizes a lens to any of this. Each fires at its own rate on the
 physics lattice, from wherever in its period an episode opens it, so it slips
 against the control step and against the other lens, and its shutter falls
 between rows as a capture's does. An episode draws where each lens stands from

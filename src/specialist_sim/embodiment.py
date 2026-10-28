@@ -77,7 +77,7 @@ class Floating:
   rotational_damping: float = 0.5
   speed: float = 1.5
   turn: float = 10.0
-  """The fastest the feedforward asks a rig to go, in metres and radians a second."""
+  """The fastest the feedforward asks a rig to go, in meters and radians a second."""
 
   def attach(self, room: mujoco.MjSpec) -> None:
     for slot in self.slots:
