@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from math import comb
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -24,8 +25,10 @@ __all__ = [
   "Env",
   "Outcome",
   "Policy",
+  "Recording",
   "Report",
   "eval_policy",
+  "mcnemar",
   "revision",
   "summary",
 ]
@@ -85,6 +88,15 @@ class Policy(Protocol):
     ...
 
 
+class Recording(Protocol):
+  """What keeps the episodes an evaluation runs, told as each env's episode
+  starts, steps and ends."""
+
+  def start(self, env_idx: int, seed: int) -> None: ...
+  def extend(self, env_idx: int) -> None: ...
+  def finish(self, env_idx: int, outcome: Outcome) -> None: ...
+
+
 @dataclass(frozen=True)
 class Outcome:
   """What one episode did, from the env's own reports."""
@@ -108,9 +120,11 @@ def eval_policy(
   policy: Policy,
   seeds: Sequence[int],
   max_episode_steps: int = MAX_EPISODE_STEPS,
+  recording: Recording | None = None,
 ) -> list[Outcome]:
-  """Run one episode per seed, keeping every env busy: an env whose
-  episode ends restarts alone on the next seed, and the policy is told."""
+  """Run one episode per seed, keeping every env busy: an env whose episode
+  ends restarts alone on the next seed, and the policy is told. ``recording``
+  keeps every episode, if given."""
   queue = [int(seed) for seed in seeds]
   if not queue:
     return []
@@ -120,6 +134,9 @@ def eval_policy(
   observation, _ = env.reset(padded)
   policy.reset(range(env.num_envs), padded)
   running: list[int | None] = list(first) + [None] * (env.num_envs - len(first))
+  if recording is not None:
+    for env_idx, opened in enumerate(first):
+      recording.start(env_idx, opened)
   steps = np.zeros(env.num_envs, np.int64)
   tracking_error: list[list[float]] = [[] for _ in range(env.num_envs)]
   outcomes: list[Outcome] = []
@@ -134,25 +151,30 @@ def eval_policy(
         continue
       steps[env_idx] += 1
       tracking_error[env_idx].append(float(report.tracking_error[env_idx]))
+      if recording is not None:
+        recording.extend(env_idx)
       if not (bool(report.done[env_idx]) or steps[env_idx] >= max_episode_steps):
         continue
-      outcomes.append(
-        Outcome(
-          seed=seed,
-          success=bool(report.success[env_idx]),
-          progress=float(report.progress[env_idx]),
-          steps=int(steps[env_idx]),
-          unstable=bool(report.unstable[env_idx]),
-          tracking_error=float(np.median(tracking_error[env_idx])),
-          labels={name: bool(held[env_idx]) for name, held in report.labels.items()},
-        )
+      outcome = Outcome(
+        seed=seed,
+        success=bool(report.success[env_idx]),
+        progress=float(report.progress[env_idx]),
+        steps=int(steps[env_idx]),
+        unstable=bool(report.unstable[env_idx]),
+        tracking_error=float(np.median(tracking_error[env_idx])),
+        labels={name: bool(held[env_idx]) for name, held in report.labels.items()},
       )
+      outcomes.append(outcome)
+      if recording is not None:
+        recording.finish(env_idx, outcome)
       if queue:
         drawn = queue.pop(0)
         observation, _ = env.reset([drawn], env_ids=[env_idx])
         policy.reset([env_idx], [drawn])
         running[env_idx] = drawn
         steps[env_idx], tracking_error[env_idx] = 0, []
+        if recording is not None:
+          recording.start(env_idx, drawn)
       else:
         running[env_idx] = None
   return sorted(outcomes, key=lambda outcome: outcome.seed)
@@ -173,7 +195,7 @@ def summary(
     "num_envs": env.num_envs,
     "success_rate": len(wins) / len(outcomes),
     "progress": float(np.mean([outcome.progress for outcome in outcomes])),
-    "broke_rate": sum(outcome.unstable for outcome in outcomes) / len(outcomes),
+    "unstable_rate": sum(outcome.unstable for outcome in outcomes) / len(outcomes),
     **{
       f"{name}_rate": sum(outcome.labels[name] for outcome in outcomes) / len(outcomes)
       for name in named
@@ -199,3 +221,21 @@ def revision(env: Env) -> str:
   digest.update(repr(env.cfg).encode())
   digest.update(mujoco.__version__.encode())
   return digest.hexdigest()[:12]
+
+
+def mcnemar(
+  first: Sequence[Outcome], second: Sequence[Outcome]
+) -> tuple[int, int, float]:
+  """Two evaluations of the same seeds compared episode by episode: how many
+  only the first succeeded at, how many only the second, and the exact
+  two-sided McNemar p-value that they succeed equally often. Pairing removes
+  the variance between seeds, so it detects a smaller difference than two
+  success rates do."""
+  wins = {outcome.seed: outcome.success for outcome in second}
+  if sorted(wins) != sorted(outcome.seed for outcome in first):
+    raise ValueError("the two evaluations ran different seeds")
+  only_first = sum(outcome.success and not wins[outcome.seed] for outcome in first)
+  only_second = sum(wins[outcome.seed] and not outcome.success for outcome in first)
+  flipped = only_first + only_second
+  tail = sum(comb(flipped, k) for k in range(min(only_first, only_second) + 1))
+  return only_first, only_second, min(1.0, 2.0 * tail / 2**flipped)

@@ -18,15 +18,17 @@ A hand is ``[position(3), wxyz(4), opening(1)]`` in the room frame, in
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
 from specialist_sim.arrays import Float64Array
+from specialist_sim.eval import Outcome
+from specialist_sim.rig import Rig
 
-__all__ = ["Episode", "Recorder", "listing", "load", "save"]
+__all__ = ["Episode", "Recordable", "Recorder", "Recordings", "listing", "load", "save"]
 
 
 @dataclass(frozen=True)
@@ -129,3 +131,37 @@ class Recorder:
 
   def discard(self) -> None:
     self.name, self._meta, self._rows = None, {}, []
+
+
+class Recordable(Protocol):
+  """A vector env whose episodes can be recorded: its rig, and the ``meta`` an
+  episode of one env starts with."""
+
+  @property
+  def num_envs(self) -> int: ...
+  @property
+  def rig(self) -> Rig: ...
+  def describe(self, env_idx: int) -> dict[str, Any]: ...
+
+
+class Recordings:
+  """Every episode an evaluation runs in ``env``, each saved to ``folder`` as
+  ``<prefix>_<seed>.npz`` when it ends, with its outcome: an
+  ``eval.Recording``."""
+
+  def __init__(self, env: Recordable, folder: Path, source: str, prefix: str):
+    self.env, self.folder, self.source, self.prefix = env, folder, source, prefix
+    self._recorders = [Recorder() for _ in range(env.num_envs)]
+
+  def start(self, env_idx: int, seed: int) -> None:
+    recorder = self._recorders[env_idx]
+    recorder.start(
+      f"{self.prefix}_{seed:06d}", {"source": self.source, **self.env.describe(env_idx)}
+    )
+    recorder.extend(*(rows[-1:] for rows in self.env.rig.rows(env_idx)))
+
+  def extend(self, env_idx: int) -> None:
+    self._recorders[env_idx].extend(*self.env.rig.rows(env_idx))
+
+  def finish(self, env_idx: int, outcome: Outcome) -> None:
+    save(self.folder, self._recorders[env_idx].finish({"outcome": asdict(outcome)}))
