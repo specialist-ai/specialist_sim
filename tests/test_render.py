@@ -175,9 +175,7 @@ def test_a_textured_box_reads_its_map() -> None:
   bright = view.image[struck].max(axis=1)
   black, white = bright < 10, bright > 100
   assert 0.35 < black.mean() < 0.65, "the checker is half black"
-  assert (black | white).mean() > 0.9, (
-    "the checker is two colours, blended at the edges"
-  )
+  assert (black | white).mean() > 0.9, "the checker is two colors, blended at the edges"
 
 
 def test_a_world_without_lights_is_lit_by_nothing_but_its_ambient() -> None:

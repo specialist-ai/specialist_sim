@@ -19,7 +19,7 @@ from specialist_sim.pickplace.room import ASSETS, Room
 from specialist_sim.pickplace.task import (
   BIMANUAL,
   SETTLE_STEPS,
-  Judgement,
+  Judgment,
   Start,
   Task,
   look,
@@ -76,7 +76,7 @@ class Cfg:
 
 
 @dataclass(frozen=True)
-class Report(Judgement):
+class Report(Judgment):
   """How every world's episode stands after a reset or a step."""
 
   picked: BoolArray
@@ -86,7 +86,7 @@ class Report(Judgement):
   broke: BoolArray
   """Whether the physics could not carry the world, latched."""
   tracking: Float64Array
-  """The largest gap between a driven hand and its setpoint, in metres."""
+  """The largest gap between a driven hand and its setpoint, in meters."""
   reward: Float64Array
   """One on the step success latches."""
   done: BoolArray
@@ -146,21 +146,21 @@ class PickPlace:
     """Track the leading poses of every world's trajectory, ``(worlds, poses,
     driven, 8)``, and judge where that leaves the cube."""
     observation = self.rig.step(action)
-    judgement = self._look()
-    reached = self.cfg.task.goal.reached(judgement)
+    judgment = self._look()
+    reached = self.cfg.task.goal.reached(judgment)
     self._settled = np.where(reached, self._settled + 1, 0)
     won = (self._settled >= SETTLE_STEPS) & ~self._success
     self._success |= won
-    return observation, self._report(judgement, won.astype(np.float64))
+    return observation, self._report(judgment, won.astype(np.float64))
 
-  def _look(self) -> Judgement:
+  def _look(self) -> Judgment:
     seen = [look(self.room, data) for data in self.rig.datas]
     cube = np.stack([one[0] for one in seen])
     standing = on_tape(self.room, cube)
     held = np.array([one[2] for one in seen])
     self._displaced |= ~standing
     self._picked |= held & (cube[:, 2] > self.room.cube.rest + PICK_LIFT)
-    return Judgement(
+    return Judgment(
       cube=cube,
       on_tape=standing,
       resting=np.array([one[1] for one in seen]),
@@ -169,13 +169,13 @@ class PickPlace:
       displaced=self._displaced.copy(),
     )
 
-  def _report(self, judgement: Judgement, reward: Float64Array) -> Report:
+  def _report(self, judgment: Judgment, reward: Float64Array) -> Report:
     return Report(
-      **vars(judgement),
+      **vars(judgment),
       picked=self._picked.copy(),
       success=self._success.copy(),
       broke=self.rig.broke.copy(),
       tracking=self.rig.tracking.copy(),
       reward=reward,
-      done=self._success | judgement.dropped | self.rig.broke,
+      done=self._success | judgment.dropped | self.rig.broke,
     )
