@@ -14,7 +14,7 @@ import numpy as np
 
 from specialist_sim.dataset.take import Take
 from specialist_sim.gripper import SLOTS
-from specialist_sim.pickplace import Cfg, PickPlace
+from specialist_sim.pickplace import Cfg, PickPlaceEnv
 from specialist_sim.pickplace.task import Fixed
 
 
@@ -29,7 +29,7 @@ def main() -> None:
   cfg = Cfg()
   take = Take(args.dataset, args.session, args.layer, 1.0 / cfg.clock.step_dt)
   size = take.observed(0, 0).shape[0]
-  env = PickPlace(
+  env = PickPlaceEnv(
     Cfg(
       image_size=size,
       cameras={
@@ -38,7 +38,7 @@ def main() -> None:
       },
     )
   )
-  env.reset([0], start=Fixed(take.pose(0), np.array([*env.room.tape, 0.0])))
+  env.reset([0], initial_condition=Fixed(take.pose(0), np.array([*env.room.tape, 0.0])))
   writer = imageio_ffmpeg.write_frames(
     str(args.output),
     (size * len(SLOTS), size * 2),
@@ -49,7 +49,9 @@ def main() -> None:
   writer.send(None)
   gaps = []
   for tick in range(len(take.times)):
-    observation, _ = env.step(take.trajectory(tick, env.rig.cfg.clock.tracked)[None])
+    observation, _ = env.step(
+      take.action_chunk(tick, env.rig.cfg.clock.n_action_steps)[None]
+    )
     top = np.concatenate(list(observation.image[0]), axis=1)
     bottom = np.concatenate(
       [

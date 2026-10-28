@@ -1,13 +1,13 @@
-"""The hand: what the description gives it, and how a carrier stands it up."""
+"""The hand: what the description gives it, and how an embodiment stands it up."""
 
 import mujoco
 import numpy as np
 import pytest
 
+from scene import bare
 from specialist_sim import gripper
 from specialist_sim.embodiment import Embodiment, Floating
 from specialist_sim.gripper import SLOTS
-from world import bare
 
 
 def _stand(embodiment: Embodiment) -> mujoco.MjModel:
@@ -28,7 +28,7 @@ def test_the_described_hand_binds_by_its_slot() -> None:
   assert gripper.SHUT < gripper.OPEN
 
 
-def test_a_carrier_stands_the_hands_it_was_given(embodiment: Embodiment) -> None:
+def test_an_embodiment_stands_the_hands_it_was_given(embodiment: Embodiment) -> None:
   model = _stand(embodiment)
   hands = embodiment.bind(model)
   assert tuple(hand.slot for hand in hands) == SLOTS
@@ -37,7 +37,9 @@ def test_a_carrier_stands_the_hands_it_was_given(embodiment: Embodiment) -> None
   assert tuple(hand.slot for hand in one.bind(model)) == (SLOTS[1],)
 
 
-def test_a_hand_is_read_back_where_its_carrier_put_it(embodiment: Embodiment) -> None:
+def test_a_hand_is_read_back_where_its_embodiment_put_it(
+  embodiment: Embodiment,
+) -> None:
   """A pose is the gripper base's, whatever holds it up."""
   model = _stand(embodiment)
   hands = embodiment.bind(model)

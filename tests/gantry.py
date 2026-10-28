@@ -1,4 +1,4 @@
-"""A gantry: the gripper on six servoed joints, a carrier that is a joint chain.
+"""A gantry: the gripper on six servoed joints, an embodiment that is a joint chain.
 
 Three slides along the room's axes carry three hinges, yaw then pitch then
 roll, and the gripper base sits at the wrist's center. Every pose has a joint
@@ -16,9 +16,9 @@ import mujoco
 import numpy as np
 
 from specialist_sim import gripper
+from specialist_sim.action import Interpolator
 from specialist_sim.arrays import Float64Array
 from specialist_sim.gripper import SLOTS, Hand
-from specialist_sim.trajectory import Ramp
 
 JOINTS = ("slide_x", "slide_y", "slide_z", "yaw", "pitch", "roll")
 _KIND = (mujoco.mjtJoint.mjJNT_SLIDE,) * 3 + (mujoco.mjtJoint.mjJNT_HINGE,) * 3
@@ -33,17 +33,17 @@ class Gantry:
   rotational_stiffness: float = 40.0
   rotational_damping: float = 0.5
 
-  def attach(self, room: mujoco.MjSpec) -> None:
+  def attach(self, scene: mujoco.MjSpec) -> None:
     gains = [(self.stiffness, self.damping)] * 3 + [
       (self.rotational_stiffness, self.rotational_damping)
     ] * 3
     for slot in self.slots:
-      parent = room.worldbody
+      parent = scene.worldbody
       for name, kind, axis, (kp, kv) in zip(JOINTS, _KIND, _AXIS, gains, strict=True):
         body = parent.add_body(name=f"{slot}_carriage_{name}", gravcomp=1.0)
         body.mass, body.inertia, body.explicitinertial = 0.5, [1e-3] * 3, True
         body.add_joint(name=f"{slot}_{name}", type=kind, axis=axis)
-        room.add_actuator(
+        scene.add_actuator(
           name=f"{slot}_{name}",
           target=f"{slot}_{name}",
           trntype=mujoco.mjtTrn.mjTRN_JOINT,
@@ -52,7 +52,7 @@ class Gantry:
           biasprm=[0.0, -kp, -kv] + [0.0] * 7,
         )
         parent = body
-      room.attach(gripper.spec(), prefix=f"{slot}_", frame=parent.add_frame())
+      scene.attach(gripper.spec(), prefix=f"{slot}_", frame=parent.add_frame())
 
   def bind(self, model: mujoco.MjModel) -> tuple[Hand, ...]:
     hands = tuple(gripper.bind(model, slot) for slot in self.slots)
@@ -78,21 +78,21 @@ class Gantry:
     data.qpos[self._joints[hand, :3]] = pose[:3]
     data.qpos[self._joints[hand, 3:]] = euler_zyx(pose[3:7])
 
-  def reset(self, worlds: Sequence[int], qpos: Float64Array) -> None:
+  def reset(self, env_ids: Sequence[int], qpos: Float64Array) -> None:
     """A servo carries no state between steps."""
 
   def command(
     self,
-    ramp: Ramp,
+    interpolator: Interpolator,
     substep: int,
     qpos: Float64Array,
     ctrl: Float64Array,
     xfrc: Float64Array,
   ) -> None:
-    ctrl[:, self._motors[:, :3]] = ramp.position[:, substep]
+    ctrl[:, self._motors[:, :3]] = interpolator.position[:, substep]
     ctrl[:, self._motors[:, 2]] += self._lift
-    ctrl[:, self._motors[:, 3:]] = euler_zyx(ramp.quaternion[:, substep])
-    gripper.grip(ctrl, self._servos, ramp.opening[:, substep])
+    ctrl[:, self._motors[:, 3:]] = euler_zyx(interpolator.quaternion[:, substep])
+    gripper.grip(ctrl, self._servos, interpolator.opening[:, substep])
 
 
 def euler_zyx(quaternion: Float64Array) -> Float64Array:

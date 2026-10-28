@@ -89,7 +89,7 @@ def bind(model: mujoco.MjModel, slot: str) -> Hand:
 
 
 def grip(ctrl: Float64Array, servos: Int64Array, opening: Float64Array) -> None:
-  """Send every hand's finger servos, ``(hands, 2)``, an opening, ``(worlds,
+  """Send every hand's finger servos, ``(hands, 2)``, an opening, ``(num_envs,
   hands)``: the left finger to it and the right mirrored."""
   ctrl[:, servos] = opening[..., None] * np.array([1.0, -1.0])
 

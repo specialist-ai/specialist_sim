@@ -1,4 +1,4 @@
-"""The task: which hands a policy drives, where an episode opens, and what
+"""The task: which hands a policy drives, its initial conditions, and what
 the cube must do for it to be won.
 """
 
@@ -22,15 +22,15 @@ __all__ = [
   "Fixed",
   "Goal",
   "Home",
-  "Judgment",
+  "InitialCondition",
   "Placed",
+  "Predicates",
   "Region",
   "RestingIn",
-  "Start",
   "Task",
+  "evaluate",
   "home",
   "left_task",
-  "look",
   "on_tape",
   "right_task",
   "task_for",
@@ -96,7 +96,9 @@ class Region:
         return spot
 
 
-class Start(Protocol):
+class InitialCondition(Protocol):
+  """A distribution over how an episode begins, sampled from its seed."""
+
   def draw(
     self, room: Room, rng: np.random.Generator
   ) -> tuple[Float64Array, Float64Array]:
@@ -130,7 +132,7 @@ class Home:
 
 @dataclass(frozen=True)
 class Fixed:
-  """A start named outright."""
+  """An initial condition named outright."""
 
   hands: Float64Array
   cube: Float64Array
@@ -163,11 +165,11 @@ def on_tape(room: Room, position: Float64Array) -> BoolArray:
 
 
 @dataclass(frozen=True)
-class Judgment:
-  """What every world's cube is doing, one entry per world."""
+class Predicates:
+  """The task's predicates on every env's cube, one entry per env."""
 
   cube: Float64Array
-  """The cube's position, ``(worlds, 3)``."""
+  """The cube's position, ``(num_envs, 3)``."""
   on_tape: BoolArray
   resting: BoolArray
   held: BoolArray
@@ -177,8 +179,8 @@ class Judgment:
   """Whether it has been off the tape since the episode opened."""
 
 
-def look(room: Room, data: mujoco.MjData) -> tuple[Float64Array, bool, bool, bool]:
-  """One world's cube: its position, and whether it is resting, held and
+def evaluate(room: Room, data: mujoco.MjData) -> tuple[Float64Array, bool, bool, bool]:
+  """One env's cube: its position, and whether it is resting, held and
   dropped."""
   cube = room.cube
   position = data.xpos[cube.body]
@@ -198,8 +200,8 @@ def look(room: Room, data: mujoco.MjData) -> tuple[Float64Array, bool, bool, boo
 
 
 class Goal(Protocol):
-  def reached(self, judgment: Judgment) -> BoolArray:
-    """Which worlds' cubes are doing what the task asks."""
+  def reached(self, predicates: Predicates) -> BoolArray:
+    """Which envs' cubes are doing what the task asks."""
     ...
 
 
@@ -207,9 +209,9 @@ class Goal(Protocol):
 class Placed:
   """The cube back on the tape, at rest and let go of, having been off it."""
 
-  def reached(self, judgment: Judgment) -> BoolArray:
+  def reached(self, predicates: Predicates) -> BoolArray:
     out: BoolArray = (
-      judgment.displaced & judgment.on_tape & judgment.resting & ~judgment.held
+      predicates.displaced & predicates.on_tape & predicates.resting & ~predicates.held
     )
     return out
 
@@ -220,12 +222,12 @@ class RestingIn:
 
   region: Region
 
-  def reached(self, judgment: Judgment) -> BoolArray:
+  def reached(self, predicates: Predicates) -> BoolArray:
     out: BoolArray = (
-      judgment.resting
-      & ~judgment.on_tape
-      & ~judgment.held
-      & self.region.contains(judgment.cube[:, :2])
+      predicates.resting
+      & ~predicates.on_tape
+      & ~predicates.held
+      & self.region.contains(predicates.cube[:, :2])
     )
     return out
 
@@ -234,7 +236,7 @@ class RestingIn:
 class Task:
   driven: tuple[str, ...]
   """The hands the action commands and the observation carries states for."""
-  start: Start = Home()
+  initial_condition: InitialCondition = Home()
   goal: Goal = Placed()
   seen: tuple[str, ...] = ()
   """Lenses the observation carries beyond the driven hands' own."""

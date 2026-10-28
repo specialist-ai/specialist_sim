@@ -1,5 +1,5 @@
-"""A demonstration written as stages: each carries one hand along a
-minimum-jerk curve to a goal a script names and works the fingers over a
+"""A scripted policy written as stages: each carries one hand along a
+minimum-jerk curve to a waypoint a script names and works the fingers over a
 window of the move.
 """
 
@@ -11,19 +11,19 @@ from typing import Any, Protocol
 import numpy as np
 
 from specialist_sim import rotation
+from specialist_sim.action import hold
 from specialist_sim.arrays import Float64Array
 from specialist_sim.gripper import OPEN, SHUT
-from specialist_sim.trajectory import hold
 
 __all__ = [
-  "Aim",
-  "Expert",
-  "ExpertCfg",
   "Grip",
-  "Leg",
   "Move",
   "Script",
+  "ScriptedPolicy",
+  "ScriptedPolicyCfg",
+  "Segment",
   "Stage",
+  "Waypoint",
 ]
 
 PEAK = 1.875
@@ -38,7 +38,7 @@ and out."""
 
 
 @dataclass(frozen=True)
-class ExpertCfg:
+class ScriptedPolicyCfg:
   """How a demonstration paces itself. Rates of the fingers are in radians a
   second."""
 
@@ -81,8 +81,8 @@ class Stage:
 
 
 @dataclass(frozen=True)
-class Aim:
-  """What a script answers when a stage begins."""
+class Waypoint:
+  """Where a stage sends its hand: what a script answers when the stage begins."""
 
   goal: Float64Array
   """Where the hand's base goes."""
@@ -101,7 +101,7 @@ class Aim:
 
 
 class Script(Protocol):
-  """A scene's rules: what each stage of a cycle does there."""
+  """An env's rules: what each stage of a cycle does there."""
 
   @property
   def stages(self) -> tuple[Stage, ...]: ...
@@ -111,26 +111,26 @@ class Script(Protocol):
     """The corner to corner box a hand's base is kept inside."""
     ...
 
-  def opens(self, hands: Float64Array, world: Any) -> int:
-    """The stage a cycle begins at, given how the world stands."""
+  def opens(self, hands: Float64Array, env_state: Any) -> int:
+    """The stage a cycle begins at, given the env state."""
     ...
 
-  def aim(
-    self, stage: Stage, hands: Float64Array, pose: Float64Array, world: Any
-  ) -> Aim:
+  def waypoint(
+    self, stage: Stage, hands: Float64Array, pose: Float64Array, env_state: Any
+  ) -> Waypoint:
     """Where a stage sends its hand, from the plant's state, ``(hands, 8)``,
     and the last commanded one."""
     ...
 
   def arrived(
-    self, stage: Stage, elapsed: float, hands: Float64Array, world: Any
+    self, stage: Stage, elapsed: float, hands: Float64Array, env_state: Any
   ) -> bool | None:
     """Whether the plant has answered a stage whose move has run, or
     ``None`` where nearness to the goal decides."""
     ...
 
-  def finished(self, world: Any) -> bool:
-    """Whether the world stands as the task wants it."""
+  def finished(self, env_state: Any) -> bool:
+    """Whether the env state is as the task wants it."""
     ...
 
 
@@ -225,7 +225,7 @@ class Grip:
 
 
 @dataclass
-class Leg:
+class Segment:
   """One hand's motion over one stage: where it goes, what the fingers do,
   the wrist it turns from and to, and how much of the move the turn takes."""
 
@@ -235,9 +235,10 @@ class Leg:
   turning: float = 1.0
   elapsed: float = 0.0
 
-  def lay(self, out: Float64Array, hand: int, period: float) -> None:
-    """Write this leg's poses for one hand into a trajectory, ``(poses, hands, 8)``."""
-    whens = self.elapsed + np.arange(1, len(out) + 1) * period
+  def lay(self, out: Float64Array, hand: int, action_dt: float) -> None:
+    """Write this segment's actions for one hand into an action chunk,
+    ``(chunk_size, hands, 8)``."""
+    whens = self.elapsed + np.arange(1, len(out) + 1) * action_dt
     spin = rotation.log(
       rotation.multiply(rotation.conjugate(self.turn[0]), self.turn[1])
     )
@@ -252,21 +253,22 @@ class Leg:
       out[row, hand, 7] = self.grip.at(float(when) / self.move.span)
 
 
-class Expert:
+class ScriptedPolicy:
   """The rule-based policy: a script's stages, paced and carried out."""
 
   def __init__(
     self,
     script: Script,
     rng: np.random.Generator,
-    period: float,
-    tracked: int,
-    cfg: ExpertCfg | None = None,
+    action_dt: float,
+    n_action_steps: int,
+    cfg: ScriptedPolicyCfg | None = None,
   ):
-    self.script, self.rng, self.period, self.tracked = script, rng, period, tracked
-    """The script, the stream every draw comes from, the pose period of the
-    trajectory it emits, and how many of those poses a control step executes."""
-    self.cfg = cfg or ExpertCfg()
+    self.script, self.rng = script, rng
+    self.action_dt, self.n_action_steps = action_dt, n_action_steps
+    """The script, the stream every draw comes from, the action period of the
+    chunks it emits, and how many of those actions a control step executes."""
+    self.cfg = cfg or ScriptedPolicyCfg()
     self.stage = 0
     self.cycles = 0
     """How many cycles have finished."""
@@ -277,47 +279,47 @@ class Expert:
     self._carry = np.zeros(3)
     self._clock = 0.0
     self._pose: Float64Array | None = None
-    self._leg: Leg | None = None
+    self._segment: Segment | None = None
 
-  def act(self, state: Float64Array, world: Any) -> Float64Array:
-    """The trajectory the demonstration commands, ``(HORIZON, hands, 8)``,
+  def predict_action_chunk(self, state: Float64Array, env_state: Any) -> Float64Array:
+    """The action chunk the demonstration commands, ``(CHUNK_SIZE, hands, 8)``,
     from every hand's state, ``(hands, 8)``."""
     reached = np.asarray(state, np.float64)
     if self._pose is None:
       self._pose = reached.copy()
     if not self.done:
-      self._settle(reached, world)
+      self._settle(reached, env_state)
     out = hold(self._pose)
-    if self._leg is not None:
-      self._leg.lay(out, self.script.stages[self.stage].hand, self.period)
-      self._leg.elapsed += self.tracked * self.period
-      self._clock += self.tracked * self.period
+    if self._segment is not None:
+      self._segment.lay(out, self.script.stages[self.stage].hand, self.action_dt)
+      self._segment.elapsed += self.n_action_steps * self.action_dt
+      self._clock += self.n_action_steps * self.action_dt
       out[:, :, :3] = np.clip(out[:, :, :3], *self.script.reach)
       out[:, :, 7] = np.clip(out[:, :, 7], SHUT, OPEN)
-      self._pose = out[self.tracked - 1].copy()
+      self._pose = out[self.n_action_steps - 1].copy()
     return out
 
-  def _settle(self, reached: Float64Array, world: Any) -> None:
+  def _settle(self, reached: Float64Array, env_state: Any) -> None:
     """Plan the stage that is due, and leave it once its move has run and the
     plant has answered."""
-    if self._leg is not None and self._arrived(reached, world):
-      self._step_on(world)
-    if self._leg is None and not self.done:
+    if self._segment is not None and self._arrived(reached, env_state):
+      self._step_on(env_state)
+    if self._segment is None and not self.done:
       if self.stage == 0:
-        self.stage = self.script.opens(reached, world)
-      self._plan(reached, world)
+        self.stage = self.script.opens(reached, env_state)
+      self._plan(reached, env_state)
 
-  def _step_on(self, world: Any) -> None:
+  def _step_on(self, env_state: Any) -> None:
     """Retire the stage, and the cycle with it once the last one is done."""
-    assert self._leg is not None
+    assert self._segment is not None
     stages = self.script.stages
     hand = stages[self.stage].hand
-    rate = self._leg.move.rate_at(self._leg.elapsed)
+    rate = self._segment.move.rate_at(self._segment.elapsed)
     limit = self.cfg.flow * self.cfg.speed
     fast = float(np.linalg.norm(rate))
     if fast > limit:
       rate = rate * (limit / fast)
-    self._leg = None
+    self._segment = None
     self.stage += 1
     if self.stage < len(stages):
       self._carry = rate if stages[self.stage].hand == hand else np.zeros(3)
@@ -327,49 +329,53 @@ class Expert:
     self.cycles += 1
     self._pace = float(self.rng.uniform(*self.cfg.pace))
     self.done = self._clock >= self._length and (
-      self.script.finished(world) or self._clock >= self._length + self.cfg.rescue
+      self.script.finished(env_state) or self._clock >= self._length + self.cfg.rescue
     )
 
-  def _arrived(self, reached: Float64Array, world: Any) -> bool:
-    assert self._leg is not None
-    leg, stage = self._leg, self.script.stages[self.stage]
-    if leg.elapsed > leg.move.span + DWELL:
+  def _arrived(self, reached: Float64Array, env_state: Any) -> bool:
+    assert self._segment is not None
+    segment, stage = self._segment, self.script.stages[self.stage]
+    if segment.elapsed > segment.move.span + DWELL:
       return True
-    if leg.elapsed < leg.move.span:
+    if segment.elapsed < segment.move.span:
       return False
-    answer = self.script.arrived(stage, leg.elapsed, reached, world)
+    answer = self.script.arrived(stage, segment.elapsed, reached, env_state)
     if answer is not None:
       return answer
     return (
-      float(np.linalg.norm(reached[stage.hand, :3] - leg.move.at(leg.move.span)))
+      float(
+        np.linalg.norm(reached[stage.hand, :3] - segment.move.at(segment.move.span))
+      )
       < REACHED
     )
 
-  def _plan(self, reached: Float64Array, world: Any) -> None:
+  def _plan(self, reached: Float64Array, env_state: Any) -> None:
     """Lay a curve from where the command stands to where the stage sends it."""
     assert self._pose is not None
     stage = self.script.stages[self.stage]
-    aim = self.script.aim(stage, reached, self._pose, world)
+    waypoint = self.script.waypoint(stage, reached, self._pose, env_state)
     start = self._pose[stage.hand, :3].copy()
     held = float(self._pose[stage.hand, 7])
     span = self._paced() * max(
       BRIEF,
-      self._travel(start, aim.goal, aim.speed, aim.bulge),
-      self._gripping(stage, held, aim.opening),
+      self._travel(start, waypoint.goal, waypoint.speed, waypoint.bulge),
+      self._gripping(stage, held, waypoint.opening),
     )
     landing = (
-      None if aim.landing is None else aim.landing * self.cfg.flow * self.cfg.speed
+      None
+      if waypoint.landing is None
+      else waypoint.landing * self.cfg.flow * self.cfg.speed
     )
-    self._leg = Leg(
-      Move.plan(start, self._carry, aim.goal, span, aim.bulge, landing),
-      Grip(held, aim.opening, *stage.window),
-      (self._pose[stage.hand, 3:7].copy(), rotation.from_matrix(aim.facing)),
-      aim.turning,
+    self._segment = Segment(
+      Move.plan(start, self._carry, waypoint.goal, span, waypoint.bulge, landing),
+      Grip(held, waypoint.opening, *stage.window),
+      (self._pose[stage.hand, 3:7].copy(), rotation.from_matrix(waypoint.facing)),
+      waypoint.turning,
     )
 
   def _paced(self) -> float:
     """How much this cycle stretches its stages, and how the episode tires."""
-    gone = min(self._clock / max(self._length, self.period), 1.0)
+    gone = min(self._clock / max(self._length, self.action_dt), 1.0)
     return self._pace * self._tempo * (1.0 + self.cfg.tire * gone)
 
   def _travel(
