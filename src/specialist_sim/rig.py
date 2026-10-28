@@ -346,6 +346,20 @@ class Rig:
       else:
         list(self._pool.map(self._push, shares))
 
+  def rows(self, env_idx: int) -> tuple[Float64Array, ...]:
+    """One env's rows of the last step, for ``episode.Recorder.extend``: their
+    timestamps, the hands as they stood and as commanded, ``(rows, hands,
+    8)``, and the joint coordinates and velocities."""
+    clock = self.cfg.clock
+    timestamp = (self.row[env_idx] + np.arange(1 - clock.per_step, 1)) * clock.row_dt
+    return (
+      timestamp,
+      self.state_rows[env_idx],
+      self.setpoint_rows[env_idx],
+      self.qpos_rows[env_idx],
+      self.qvel_rows[env_idx],
+    )
+
   def states(self, qpos: Float64Array) -> Float64Array:
     """Every hand read out of ``qpos``, ``(n, nq)``, ``(n, hands, 8)``."""
     return gripper.states(self.model, self._scratch, self.hands, qpos)

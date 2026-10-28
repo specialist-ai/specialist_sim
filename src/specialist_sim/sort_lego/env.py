@@ -194,20 +194,6 @@ class SortLegoEnv:
       "physics": cfg.physics.as_dict(),
     }
 
-  def rows(self, env_idx: int) -> tuple[Float64Array, ...]:
-    """One env's rows of the last step, for ``episode.Recorder.extend``: their
-    timestamps, the hands as they stood and as commanded, ``(rows, hands,
-    8)``, and the joint coordinates and velocities."""
-    rig, clock = self.rig, self.cfg.clock
-    timestamp = (rig.row[env_idx] + np.arange(1 - clock.per_step, 1)) * clock.row_dt
-    return (
-      timestamp,
-      rig.state_rows[env_idx],
-      rig.setpoint_rows[env_idx],
-      rig.qpos_rows[env_idx],
-      rig.qvel_rows[env_idx],
-    )
-
   def _lay(self, env_idx: int, layout: Layout, hands: Float64Array) -> None:
     """Stand the hands and the bricks in one env, from rest."""
     self.rig.place(env_idx, hands)

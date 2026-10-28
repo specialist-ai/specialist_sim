@@ -15,6 +15,8 @@ dependencies = [
 # A recorded dataset: a session replayed into the environment, an episode
 # written out as one, and the region a policy's picks begin in.
 dataset = ["rerun-sdk[catalog]>=0.36", "specialist-corpus", "av>=13", "imageio-ffmpeg>=0.5"]
+# Teleoperation with a Quest: the page's socket and the lens previews' JPEGs.
+teleop = ["websockets>=13", "pillow>=10"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]

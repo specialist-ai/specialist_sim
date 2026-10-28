@@ -67,11 +67,11 @@ def main() -> None:
     policy = scripted_policy(env, 0, np.random.default_rng(seed))
     recorder = episode.Recorder()
     recorder.start(f"{args.mode}_{seed:06d}", {"source": "scripted", **env.describe(0)})
-    recorder.extend(*(rows[-1:] for rows in env.rows(0)))
+    recorder.extend(*(rows[-1:] for rows in env.rig.rows(0)))
     for _ in range(steps):
       action = policy.predict_action_chunk(observation.state[0, -1], env.bricks(0))
       observation, report = env.step(action[None])
-      recorder.extend(*env.rows(0))
+      recorder.extend(*env.rig.rows(0))
       if report.done[0] or policy.done:
         break
     score = env.score(0)

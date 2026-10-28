@@ -132,10 +132,10 @@ def test_an_episode_records_every_row_and_round_trips(tmp_path: Path) -> None:
   observation, _ = env.reset([2])
   recorder = episode.Recorder()
   recorder.start("one", env.describe(0))
-  recorder.extend(*(rows[-1:] for rows in env.rows(0)))
+  recorder.extend(*(rows[-1:] for rows in env.rig.rows(0)))
   for _ in range(2):
     observation, report = env.step(hold(observation.state[:, -1]))
-    recorder.extend(*env.rows(0))
+    recorder.extend(*env.rig.rows(0))
   path = episode.save(tmp_path, recorder.finish({"score": env.score(0).as_dict()}))
   loaded = episode.load(path)
   rows = 2 * env.cfg.clock.per_step + 1
