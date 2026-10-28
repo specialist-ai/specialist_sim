@@ -14,7 +14,9 @@ __all__ = [
   "log",
   "multiply",
   "normalize",
+  "pointing",
   "rotate",
+  "slerp",
   "to_matrix",
 ]
 
@@ -85,3 +87,21 @@ def from_matrix(rotation: Float64Array) -> Float64Array:
   out = np.empty(4)
   mujoco.mju_mat2Quat(out, np.ascontiguousarray(rotation, np.float64).ravel())
   return out
+
+
+def slerp(a: Float64Array, b: Float64Array, fraction: float) -> Float64Array:
+  """A ``fraction`` of the way from ``a`` to ``b`` along the shorter arc."""
+  return multiply(a, exp(fraction * log(multiply(conjugate(a), b))))
+
+
+def pointing(fingers: Float64Array) -> Float64Array:
+  """The orientation whose x (the fingers) points along ``fingers`` and whose z
+  (the lens side) stands as far up as that allows, the way an operator holds
+  the gripper. Straight down or up, the lens side faces the operator at +x."""
+  x = np.asarray(fingers, np.float64) / np.linalg.norm(fingers)
+  up = np.array([0.0, 0.0, 1.0])
+  z = up - np.dot(up, x) * x
+  if np.linalg.norm(z) < 1e-6:
+    z = np.array([1.0, 0.0, 0.0]) - x[0] * x
+  z /= np.linalg.norm(z)
+  return from_matrix(np.stack([x, np.cross(z, x), z], axis=1))

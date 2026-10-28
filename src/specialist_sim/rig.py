@@ -190,8 +190,10 @@ class Rig:
     self.qvel_rows = np.zeros((num_envs, rows, model.nv))
     """Every env's joint coordinates and velocities at each row of the last step."""
     self.state_rows = np.zeros((num_envs, rows, hands, 8))
-    """Every env's hands at each row of the last step, ``(num_envs, rows,
-    hands, 8)``."""
+    """Every env's hands at each row of the last step, ``(num_envs, rows, hands, 8)``."""
+    self.setpoint_rows = np.zeros((num_envs, rows, hands, 8))
+    """Every env's hands as commanded at the end of each row of the last step,
+    ``(num_envs, rows, hands, 8)``: the setpoint each embodiment chased."""
     self._period = np.array(
       [
         1.0 / (cfg.cameras.get(slot, NOMINAL).hz * clock.physics_dt)
@@ -239,6 +241,7 @@ class Rig:
     self._gather()
     states = self.states(self._qpos[chosen])
     self.state_rows[chosen] = states[:, None]
+    self.setpoint_rows[chosen] = states[:, None]
     self.qpos_rows[chosen] = self._qpos[chosen, None]
     self.qvel_rows[chosen] = np.stack([self.datas[env_idx].qvel for env_idx in chosen])[
       :, None
@@ -303,6 +306,16 @@ class Rig:
     self.state_rows = self.states(self.qpos_rows.reshape(-1, model.nq)).reshape(
       self.state_rows.shape
     )
+    ends = np.arange(1, clock.per_step + 1) * clock.per_row - 1
+    interpolator = self._interpolator
+    self.setpoint_rows = np.concatenate(
+      [
+        interpolator.position[:, ends],
+        interpolator.quaternion[:, ends],
+        interpolator.opening[:, ends, :, None],
+      ],
+      axis=-1,
+    )
     self.unstable |= np.array([_warnings(data) for data in self.datas]) > warned
     apart = (
       self.state_rows[:, -1, self._driven, :3]
@@ -310,6 +323,28 @@ class Rig:
     )
     self.tracking_error = np.linalg.norm(apart, axis=-1).max(axis=1)
     return self._observe()
+
+  def settle(self, env_ids: Sequence[int], seconds: float) -> None:
+    """Run the named envs alone for ``seconds``, every hand held where it was
+    placed, so a scene's loose objects come to rest before ``begin`` opens an
+    episode. The other envs stand still."""
+    chosen = list(env_ids)
+    for env_idx in chosen:
+      mujoco.mj_forward(self.model, self.datas[env_idx])
+    self._gather()
+    self._interpolator.hold(chosen, self.states(self._qpos[chosen]))
+    self.cfg.embodiment.reset(chosen, self._qpos)
+    threads = len(self._shares)
+    shares = [chosen[part::threads] for part in range(threads)]
+    for _ in range(round(seconds / self.cfg.clock.physics_dt)):
+      self._gather()
+      self.cfg.embodiment.command(
+        self._interpolator, 0, self._qpos, self._ctrl, self._xfrc
+      )
+      if self._pool is None:
+        self._push(chosen)
+      else:
+        list(self._pool.map(self._push, shares))
 
   def states(self, qpos: Float64Array) -> Float64Array:
     """Every hand read out of ``qpos``, ``(n, nq)``, ``(n, hands, 8)``."""

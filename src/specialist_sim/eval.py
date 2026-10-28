@@ -46,6 +46,11 @@ class Report(Protocol):
   @property
   def tracking_error(self) -> Float64Array: ...
   @property
+  def progress(self) -> Float64Array:
+    """How far each env's task has come, from 0 to 1: one when it succeeds."""
+    ...
+
+  @property
   def labels(self) -> Mapping[str, BoolArray]:
     """Whatever else the env counts about each sub-env, by its own name."""
     ...
@@ -86,6 +91,8 @@ class Outcome:
 
   seed: int
   success: bool
+  progress: float
+  """How far the task came, from 0 to 1, when the episode ended."""
   steps: int
   unstable: bool
   tracking_error: float
@@ -133,6 +140,7 @@ def eval_policy(
         Outcome(
           seed=seed,
           success=bool(report.success[env_idx]),
+          progress=float(report.progress[env_idx]),
           steps=int(steps[env_idx]),
           unstable=bool(report.unstable[env_idx]),
           tracking_error=float(np.median(tracking_error[env_idx])),
@@ -164,7 +172,8 @@ def summary(
     "max_episode_steps": max_episode_steps,
     "num_envs": env.num_envs,
     "success_rate": len(wins) / len(outcomes),
-    "unstable_rate": sum(outcome.unstable for outcome in outcomes) / len(outcomes),
+    "progress": float(np.mean([outcome.progress for outcome in outcomes])),
+    "broke_rate": sum(outcome.unstable for outcome in outcomes) / len(outcomes),
     **{
       f"{name}_rate": sum(outcome.labels[name] for outcome in outcomes) / len(outcomes)
       for name in named

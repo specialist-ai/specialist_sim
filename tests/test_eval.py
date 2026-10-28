@@ -18,6 +18,7 @@ class _Report:
   done: np.ndarray
   unstable: np.ndarray
   tracking_error: np.ndarray
+  progress: np.ndarray
   labels: dict[str, np.ndarray]
 
 
@@ -36,9 +37,9 @@ class _Env:
     return Observation(
       row=np.zeros((2, 1), np.int64),
       state=np.zeros((2, 1, 1, 8)),
-      image=np.zeros((2, 1, 2, 2, 3), np.uint8),
-      body=np.zeros((2, 1, 2, 2), np.int32),
-      image_row=np.zeros(2, np.int64),
+      image=np.zeros((2, 1, 1, 2, 2, 3), np.uint8),
+      body=np.zeros((2, 1, 1, 2, 2), np.int32),
+      image_row=np.zeros((2, 1, 1), np.int64),
     )
 
   def _report(self) -> _Report:
@@ -49,6 +50,7 @@ class _Env:
       unstable=np.zeros(2, bool),
       labels={"carried": self.steps > 1},
       tracking_error=np.full(2, 0.001),
+      progress=np.where(won, 1.0, 0.5),
     )
 
   def reset(self, seeds: Sequence[int], env_ids: Sequence[int] | None = None) -> Any:
@@ -89,6 +91,7 @@ def test_eval_policy_scores_every_seed_and_restarts_envs_alone() -> None:
     and report["num_envs"] == 2
   )
   assert report["success_rate"] == 2 / 3 and report["carried_rate"] == 2 / 3
+  assert report["progress"] == (1.0 + 1.0 + 0.5) / 3
   assert report["steps_to_success"] == 2.0 and report["tracking_error"] == 0.001
   assert len(report["revision"]) == 12 and report["cfg"] == "'stub'"
 
