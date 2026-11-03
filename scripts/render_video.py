@@ -7,7 +7,8 @@ recorded states at 30 Hz.
 
 The lenses are the whole 720 px frame halved, not the views a policy crops
 from it. The overview is MuJoCo's own renderer looking at the tray from the
-operator's side. It needs ``ffmpeg`` and a GPU.
+operator's side, drawing the geom groups the lenses draw, so no collider shows.
+It needs ``ffmpeg`` and a GPU.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import numpy as np
 
 from specialist_sim import episode
 from specialist_sim.gripper import SLOTS
-from specialist_sim.render import Renderer
+from specialist_sim.render import DRAWN_GROUPS, Renderer
 from specialist_sim.sort_lego import Cfg, SortLegoEnv, scene
 from specialist_sim.sort_lego.env import LENS
 
@@ -52,6 +53,8 @@ def main() -> None:
     model, {hand.slot: (hand.base, LENS) for hand in rig.hands}, 2 * SIDE
   )
   overview = mujoco.Renderer(model, SIDE, SIDE)
+  shown = mujoco.MjvOption()
+  shown.geomgroup[:] = [group in DRAWN_GROUPS for group in range(len(shown.geomgroup))]
   camera = mujoco.MjvCamera()
   camera.lookat[:] = [scene.TRAY_CENTER[0] - 0.08, scene.TRAY_CENTER[1], scene.DESK_TOP]
   camera.distance, camera.azimuth, camera.elevation = 0.9, 180.0, -50.0
@@ -67,7 +70,7 @@ def main() -> None:
   for row in range(0, len(recorded.timestamp), stride):
     data.qpos[:] = recorded.qpos[row]
     mujoco.mj_kinematics(model, data)
-    overview.update_scene(data, camera)
+    overview.update_scene(data, camera, scene_option=shown)
     images, _ = lenses.render_many([data], list(SLOTS))
     frame = np.concatenate([overview.render(), *images[0, :, ::2, ::2]], axis=1)
     encoder.stdin.write(np.ascontiguousarray(frame, np.uint8).tobytes())
