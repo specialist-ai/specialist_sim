@@ -167,6 +167,45 @@ function place(object, pose, at) {
   object.quaternion.set(pose[at + 4], pose[at + 5], pose[at + 6], pose[at + 3]);  // wxyz to xyzw
 }
 
+// A mesh shaded by its creases: each corner takes the faces round its vertex that meet its own face
+// at under CREASE. Averaging every face round a vertex, as computeVertexNormals does, smears a CAD
+// part's sharp edges across its flat walls in long bands. three.js's toCreasedNormals welds corners
+// on a 1 cm grid, too coarse for meshes in meters.
+const CREASE = Math.cos(THREE.MathUtils.degToRad(40));
+function creased(vertices, faces) {
+  const count = faces.length / 3;
+  const area = new Float32Array(3 * count), unit = new Float32Array(3 * count);
+  const around = Array.from({ length: vertices.length / 3 }, () => []);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let face = 0; face < count; face++) {
+    a.fromArray(vertices, 3 * faces[3 * face]);
+    b.fromArray(vertices, 3 * faces[3 * face + 1]);
+    c.fromArray(vertices, 3 * faces[3 * face + 2]);
+    c.sub(b).cross(a.sub(b));  // as computeVertexNormals: (c - b) x (a - b), its length twice the area
+    c.toArray(area, 3 * face);
+    c.normalize().toArray(unit, 3 * face);
+    for (let corner = 0; corner < 3; corner++) around[faces[3 * face + corner]].push(face);
+  }
+  const position = new Float32Array(9 * count), normal = new Float32Array(9 * count);
+  for (let face = 0; face < count; face++) {
+    for (let corner = 0; corner < 3; corner++) {
+      const vertex = faces[3 * face + corner], at = 9 * face + 3 * corner;
+      position.set(vertices.subarray(3 * vertex, 3 * vertex + 3), at);
+      a.set(0, 0, 0);
+      for (const other of around[vertex]) {
+        const dot = unit[3 * face] * unit[3 * other] + unit[3 * face + 1] * unit[3 * other + 1]
+          + unit[3 * face + 2] * unit[3 * other + 2];
+        if (dot >= CREASE) a.add(b.fromArray(area, 3 * other));
+      }
+      a.normalize().toArray(normal, at);
+    }
+  }
+  const shape = new THREE.BufferGeometry();
+  shape.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  shape.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+  return shape;
+}
+
 function textured(texture) {
   // Rows arrive top first; a DataTexture reads its first row as the bottom.
   const { width, height } = texture, rgba = unpacked(texture.rgba, Uint8Array), flipped = new Uint8Array(rgba.length);
@@ -206,10 +245,7 @@ function build(message) {
     if (geom.kind === "box") {
       shape = new THREE.BoxGeometry(2 * geom.size[0], 2 * geom.size[1], 2 * geom.size[2]);
     } else {
-      shape = new THREE.BufferGeometry();
-      shape.setAttribute("position", new THREE.BufferAttribute(unpacked(geom.vertices, Float32Array), 3));
-      shape.setIndex(new THREE.BufferAttribute(unpacked(geom.faces, Uint32Array), 1));
-      shape.computeVertexNormals();
+      shape = creased(unpacked(geom.vertices, Float32Array), unpacked(geom.faces, Uint32Array));
     }
     const [r, g, b] = geom.color;
     const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(r, g, b), roughness: 0.75 });
