@@ -86,6 +86,7 @@ class Gantry:
     interpolator: Interpolator,
     substep: int,
     qpos: Float64Array,
+    qvel: Float64Array,
     ctrl: Float64Array,
     xfrc: Float64Array,
   ) -> None:

@@ -151,7 +151,9 @@ The default embodiment, `Floating`, flies each gripper on a massless free
 joint: an impedance of 4000 N/m and 40 N m/rad pulls it toward its setpoint,
 the segment's velocity fed forward and the gripper's weight cancelled. Its pull
 is capped at 25 N and 1.5 N m, a few times the gripper's 4 N weight, so a hand
-stops when the fingertips meet the table instead of driving through it.
+stops when the fingertips meet the table instead of driving through it. The cap
+bounds a push, not the speed: a hand follows its setpoint at up to 3 m/s and
+20 rad/s, and closes a gap to it at no more than 1.5 m/s and 10 rad/s.
 
 ### Choosing the cameras
 

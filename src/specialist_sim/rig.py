@@ -183,6 +183,7 @@ class Rig:
     self._shares = [range(part, num_envs, threads) for part in range(threads)]
     """The envs each thread steps."""
     self._qpos = np.zeros((num_envs, model.nq))
+    self._qvel = np.zeros((num_envs, model.nv))
     self._ctrl = np.zeros((num_envs, model.nu))
     self._xfrc = np.zeros((num_envs, model.nbody, 6))
     rows, hands = clock.per_step, len(self.slots)
@@ -284,7 +285,7 @@ class Rig:
     for substep in range(clock.per_row * clock.per_step):
       self._gather()
       self.cfg.embodiment.command(
-        self._interpolator, substep, self._qpos, self._ctrl, self._xfrc
+        self._interpolator, substep, self._qpos, self._qvel, self._ctrl, self._xfrc
       )
       if self._pool is None:
         self._push(self._shares[0])
@@ -339,7 +340,7 @@ class Rig:
     for _ in range(round(seconds / self.cfg.clock.physics_dt)):
       self._gather()
       self.cfg.embodiment.command(
-        self._interpolator, 0, self._qpos, self._ctrl, self._xfrc
+        self._interpolator, 0, self._qpos, self._qvel, self._ctrl, self._xfrc
       )
       if self._pool is None:
         self._push(chosen)
@@ -436,6 +437,7 @@ class Rig:
   def _gather(self) -> None:
     for env_idx, data in enumerate(self.datas):
       self._qpos[env_idx] = data.qpos
+      self._qvel[env_idx] = data.qvel
 
   def _push(self, share: Sequence[int]) -> None:
     """One physics step of the envs in ``share``, under the commanded drives."""
