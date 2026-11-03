@@ -39,8 +39,8 @@ class Track:
   opening: Float64Array
   """The coupled finger angle at each of those times."""
   ticks: Float64Array
-  """When this camera exposed each image. The hands share the row lattice,
-  not the instant: their shutters sit a fixed offset apart."""
+  """Each frame's time in its own video, a lattice at the camera's nominal
+  rate; the two cameras' lattices sit a fixed offset apart for the session."""
   frames: list[bytes]
   """One encoded image per tick."""
 
