@@ -120,8 +120,8 @@ def _brick_dofs(env: SortLegoEnv) -> np.ndarray[Any, Any]:
   )
 
 
-def speed(per_row: int, physics: Physics) -> dict[str, Any]:
-  env = _env(per_row, physics, control=True, mode="pile", bricks=12)
+def speed(per_row: int, physics: Physics, bins: str) -> dict[str, Any]:
+  env = _env(per_row, physics, control=True, bins=bins, mode="pile", bricks=12)
   dofs = np.add.outer(_brick_dofs(env), np.arange(3))
   rows, warnings, fastest = [], 0, 0.0
   for seed in (0, 1):
@@ -169,8 +169,8 @@ def _in_hand(state: Float64Array, brick: Float64Array) -> Float64Array:
   )
 
 
-def hold(per_row: int, physics: Physics, seed: int) -> dict[str, Any]:
-  env = _env(per_row, physics, control=False, mode="single")
+def hold(per_row: int, physics: Physics, seed: int, bins: str) -> dict[str, Any]:
+  env = _env(per_row, physics, control=False, bins=bins, mode="single")
   bricks, pads, _ = _masks(env)
   observation, _ = env.reset([seed])
   layout = env.layouts[0]
@@ -221,15 +221,15 @@ def hold(per_row: int, physics: Physics, seed: int) -> dict[str, Any]:
   }
 
 
-def rest(per_row: int, physics: Physics) -> dict[str, Any]:
-  env = _env(per_row, physics, control=False)
+def rest(per_row: int, physics: Physics, bins: str) -> dict[str, Any]:
+  env = _env(per_row, physics, control=False, bins=bins)
   bricks, _, fixtures = _masks(env)
   dofs = _brick_dofs(env)
   hands = initial.starts(SLOTS)
   data = env.rig.datas[0]
   creeps, sinks, fastest = [], [], 0.0
   for mode, seed in (("pile", 0), ("pile", 1), ("pile", 2), ("drop", 0)):
-    layout = initial.draw(mode, seed, env.cfg.colors, bricks=8)
+    layout = initial.draw(mode, seed, env.cfg.colors, bins, bricks=8)
     env.place(0, layout.poses, hands)
     env.rig.settle([0], 1.5)
     observation = env.rig.begin([0])
@@ -255,9 +255,9 @@ def rest(per_row: int, physics: Physics) -> dict[str, Any]:
   }
 
 
-def spin(per_row: int, physics: Physics) -> dict[str, Any]:
-  env = _env(per_row, physics, control=False)
-  bricks = initial.parked(env.cfg.colors)
+def spin(per_row: int, physics: Physics, bins: str) -> dict[str, Any]:
+  env = _env(per_row, physics, control=False, bins=bins)
+  bricks = initial.parked(env.cfg.colors, bins)
   bricks[0, :3] = [0.3, 0.3, 0.5]  # in the air, clear of everything
   env.place(0, bricks, initial.starts(SLOTS))
   observation = env.rig.begin([0])
@@ -274,21 +274,17 @@ def spin(per_row: int, physics: Physics) -> dict[str, Any]:
   }
 
 
-def land(per_row: int, physics: Physics) -> dict[str, Any]:
-  env = _env(per_row, physics, control=False)
+def land(per_row: int, physics: Physics, bins: str) -> dict[str, Any]:
+  env = _env(per_row, physics, control=False, bins=bins)
   model, data = env.rig.model, env.rig.datas[0]
   brick = model.body("brick_0").id
   at = model.joint("brick_0_joint").dofadr[0]
   peaks = []
   for tilt in (0.4, -0.7, 1.1):
-    bricks = initial.parked(env.cfg.colors)
+    bricks = initial.parked(env.cfg.colors, bins)
     bricks[1:, 2] -= 0.5  # out of the way
-    middle = scene.bin_center("red")
-    bricks[0, :3] = [
-      middle[0] + 0.03,
-      middle[1],
-      scene.DESK_TOP + scene.BIN_WALL + 0.06,
-    ]
+    middle = scene.BINS[bins].floor_middle("red")
+    bricks[0, :3] = [middle[0] + 0.03, middle[1], middle[2] + 0.06]
     bricks[0, 3:] = rotation.exp(np.array([tilt, 0.3 * tilt, 0.0]))
     env.place(0, bricks, initial.starts(SLOTS))
     observation = env.rig.begin([0])
@@ -306,8 +302,10 @@ def land(per_row: int, physics: Physics) -> dict[str, Any]:
   return {"land_rad_s": float(np.median(peaks))}
 
 
-def task(per_row: int, physics: Physics) -> dict[str, Any]:
-  env = _env(per_row, physics, control=True, mode="single", driven=(SLOTS[1],))
+def task(per_row: int, physics: Physics, bins: str) -> dict[str, Any]:
+  env = _env(
+    per_row, physics, control=True, bins=bins, mode="single", driven=(SLOTS[1],)
+  )
   sorted_, started = 0, 0
   for seed in range(6):
     observation, report = env.reset([seed])
@@ -330,6 +328,7 @@ def main() -> None:
   parser.add_argument(
     "--only", nargs="+", choices=sorted(CANDIDATES), default=list(CANDIDATES)
   )
+  parser.add_argument("--bins", choices=sorted(scene.BINS), default=Cfg.bins)
   args = parser.parse_args()
   mujoco.set_mju_user_warning(lambda message: None)
   columns = ["realtime", "p99_ms", "warnings", "thrown_m_s", "sink_mm", "slip_mm", "slip_deg",
@@ -338,16 +337,16 @@ def main() -> None:
   print(f"{'candidate':14s} " + " ".join(f"{column:>12s}" for column in columns))
   for name in args.only:
     per_row, physics = CANDIDATES[name]
-    row = speed(per_row, physics)
-    holds = [hold(per_row, physics, seed) for seed in range(4)]
+    row = speed(per_row, physics, args.bins)
+    holds = [hold(per_row, physics, seed, args.bins) for seed in range(4)]
     row |= {
       "sink_mm": float(np.median([each["sink_mm"] for each in holds])),
       "slip_mm": float(np.median([each["slip_mm"] for each in holds])),
       "slip_deg": float(np.median([each["slip_deg"] for each in holds])),
       "dropped": f"{sum(each['dropped'] for each in holds)}/{len(holds)}",
     }
-    row |= rest(per_row, physics) | spin(per_row, physics) | land(per_row, physics)
-    row |= task(per_row, physics)
+    row |= rest(per_row, physics, args.bins) | spin(per_row, physics, args.bins)
+    row |= land(per_row, physics, args.bins) | task(per_row, physics, args.bins)
     cells = [
       f"{row[c]:12.2f}" if isinstance(row[c], float) else f"{row[c]:>12}"
       for c in columns

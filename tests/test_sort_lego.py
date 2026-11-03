@@ -1,4 +1,5 @@
-"""The LEGO sorting scene: layouts, scoring, the swapped drawing, and the env."""
+"""The LEGO sorting scene: layouts, scoring, both kinds of bin, the swapped
+drawing, and the env."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -30,15 +31,21 @@ def _card(model: mujoco.MjModel, color: str) -> np.ndarray:
 
 @pytest.mark.parametrize("mode", initial.MODES)
 def test_a_seed_lays_the_same_tray(mode: str) -> None:
-  first, second = initial.draw(mode, 7, COLORS), initial.draw(mode, 7, COLORS)
+  first, second = (
+    initial.draw(mode, 7, COLORS, BLIND.bins),
+    initial.draw(mode, 7, COLORS, BLIND.bins),
+  )
   assert np.array_equal(first.poses, second.poses)
   assert np.array_equal(first.active, second.active)
 
 
+@pytest.mark.parametrize("bins", scene.BINS)
 @pytest.mark.parametrize("mode", initial.MODES)
-def test_bricks_lie_in_the_well_and_the_rest_in_their_bins(mode: str) -> None:
+def test_bricks_lie_in_the_well_and_the_rest_in_their_bins(
+  mode: str, bins: str
+) -> None:
   for seed in range(5):
-    layout = initial.draw(mode, seed, COLORS)
+    layout = initial.draw(mode, seed, COLORS, bins)
     on = layout.poses[layout.active]
     assert (
       np.abs(on[:, :2] - scene.TRAY_CENTER) <= np.asarray(initial.WALLS) + 0.03
@@ -47,13 +54,13 @@ def test_bricks_lie_in_the_well_and_the_rest_in_their_bins(mode: str) -> None:
       layout.poses[~layout.active], np.array(COLORS)[~layout.active], strict=True
     )
     for pose, color in parked:
-      assert task.in_bin(pose[:3]) == color
+      assert task.in_bin(pose[:3], bins) == color
 
 
 def test_a_count_sets_how_many_bricks_lie_on_the_tray() -> None:
-  assert initial.draw("drop", 3, COLORS, bricks=5).active.sum() == 5
-  assert initial.draw("pile", 3, COLORS, bricks=5).active.sum() == 5
-  assert initial.draw("single", 0, COLORS).active.sum() == 1
+  assert initial.draw("drop", 3, COLORS, BLIND.bins, bricks=5).active.sum() == 5
+  assert initial.draw("pile", 3, COLORS, BLIND.bins, bricks=5).active.sum() == 5
+  assert initial.draw("single", 0, COLORS, BLIND.bins).active.sum() == 1
 
 
 def test_a_drop_lays_one_to_eight_bricks_none_inside_another() -> None:
@@ -62,7 +69,7 @@ def test_a_drop_lays_one_to_eight_bricks_none_inside_another() -> None:
   bricks = env._brick_geoms
   counts = set()
   for seed in range(60):
-    layout = initial.draw("drop", seed, COLORS)
+    layout = initial.draw("drop", seed, COLORS, BLIND.bins)
     counts.add(int(layout.active.sum()))
     env.place(0, layout.poses, initial.starts(SLOTS))
     mujoco.mj_forward(model, data)
@@ -86,8 +93,9 @@ def test_a_reset_settles_the_bricks_on_the_tray_and_scores_none_sorted() -> None
   assert observation.state[0, -1, 1] == pytest.approx(initial.home(SLOTS[1]), abs=1e-3)
 
 
-def test_a_brick_in_its_own_bin_is_sorted_and_the_episode_succeeds() -> None:
-  env = SortLegoEnv(replace(BLIND, bricks=1))
+@pytest.mark.parametrize("bins", scene.BINS)
+def test_a_brick_in_its_own_bin_is_sorted_and_the_episode_succeeds(bins: str) -> None:
+  env = SortLegoEnv(replace(BLIND, bricks=1, bins=bins))
   observation, _ = env.reset([5])
   layout = env.layouts[0]
   assert layout is not None
@@ -95,7 +103,7 @@ def test_a_brick_in_its_own_bin_is_sorted_and_the_episode_succeeds() -> None:
   color = env.cfg.colors[brick]
   at = env._brick_q[brick]
   qpos = env.rig.datas[0].qpos
-  qpos[at : at + 3] = [*scene.BINS[color], scene.DESK_TOP + 0.03]
+  qpos[at : at + 3] = scene.BINS[bins].floor_middle(color) + [0.0, 0.0, 0.03]
   qpos[at + 3 : at + 7] = [1.0, 0.0, 0.0, 0.0]
   _, report = env.step(hold(observation.state[:, -1]))
   assert report.sorted[0] == 1 and report.success[0] and report.done[0]
@@ -104,7 +112,7 @@ def test_a_brick_in_its_own_bin_is_sorted_and_the_episode_succeeds() -> None:
 
 def test_hands_standing_where_a_brick_would_start_pass_over_that_seed() -> None:
   env = SortLegoEnv(replace(BLIND, mode="single"))
-  layout = initial.draw("single", 11, COLORS)
+  layout = initial.draw("single", 11, COLORS, BLIND.bins)
   brick = layout.poses[np.flatnonzero(layout.active)[0]]
   hands = initial.starts(SLOTS)
   hands[1, :3] = brick[:3] + np.array([0.0, 0.0, 0.01])
@@ -113,8 +121,8 @@ def test_hands_standing_where_a_brick_would_start_pass_over_that_seed() -> None:
 
 
 def test_the_swapped_scene_draws_bricks_and_cards_in_the_other_color() -> None:
-  plain = mujoco.MjSpec.compile(assets.spec(COLORS))
-  swapped = mujoco.MjSpec.compile(assets.spec(COLORS, swapped=True))
+  plain = mujoco.MjSpec.compile(assets.spec(COLORS, "clear"))
+  swapped = mujoco.MjSpec.compile(assets.spec(COLORS, "clear", swapped=True))
   for index, color in enumerate(COLORS):
     body = plain.geom_bodyid == plain.body(f"brick_{index}").id
     other = "blue" if color == "red" else "red"
@@ -125,6 +133,63 @@ def test_the_swapped_scene_draws_bricks_and_cards_in_the_other_color() -> None:
     assert np.array_equal(_card(swapped, color), _card(plain, other))
   assert np.array_equal(swapped.body_pos, plain.body_pos)
   assert np.array_equal(swapped.geom_size, plain.geom_size)
+
+
+def test_swapped_akrobins_are_drawn_in_the_other_color() -> None:
+  plain = mujoco.MjSpec.compile(assets.spec(COLORS, "akrobins"))
+  swapped = mujoco.MjSpec.compile(assets.spec(COLORS, "akrobins", swapped=True))
+  for color, other in (("red", "blue"), ("blue", "red")):
+    shell = plain.geom(f"{color}_bin_shell").id
+    assert plain.geom_rgba[shell, :3] == pytest.approx(assets.BIN_RGB[color])
+    assert swapped.geom_rgba[shell, :3] == pytest.approx(assets.BIN_RGB[other])
+  assert np.array_equal(swapped.geom_pos, plain.geom_pos)
+
+
+def test_the_akrobin_shell_matches_its_measured_size() -> None:
+  model = mujoco.MjSpec.compile(assets.spec(COLORS, "akrobins"))
+  start, count = (
+    model.mesh_vertadr[model.mesh("akrobin").id],
+    model.mesh_vertnum[model.mesh("akrobin").id],
+  )
+  data = mujoco.MjData(model)
+  mujoco.mj_forward(model, data)
+  shell = model.geom("red_bin_shell").id
+  vertices = (
+    model.mesh_vert[start : start + count] @ data.geom_xmat[shell].reshape(3, 3).T
+  )
+  vertices += data.geom_xpos[shell]
+  size = vertices.max(axis=0) - vertices.min(axis=0)
+  assert size == pytest.approx(scene.BINS["akrobins"].size, abs=5e-4)
+  middle = scene.BINS["akrobins"].middle("red")
+  assert (vertices.max(axis=0) + vertices.min(axis=0))[:2] / 2 == pytest.approx(
+    middle, abs=5e-4
+  )
+  assert vertices[:, 2].min() == pytest.approx(scene.DESK_TOP, abs=1e-4)
+
+
+@pytest.mark.parametrize("x", [-0.03, 0.0, 0.045, 0.055])
+def test_a_brick_dropped_into_an_akrobin_comes_to_rest_sorted(x: float) -> None:
+  """From over the floor, or onto the front ramp, which a brick slides down. One
+  brick of each color, so the bin is empty but for it."""
+  env = SortLegoEnv(replace(BLIND, bricks=1, mode="single", colors=("red", "blue")))
+  observation, _ = env.reset([5])
+  layout = env.layouts[0]
+  assert layout is not None
+  brick = int(np.flatnonzero(layout.active)[0])
+  color = env.cfg.colors[brick]
+  at = env._brick_q[brick]
+  qpos = env.rig.datas[0].qpos
+  middle = scene.BINS["akrobins"].middle(color)
+  qpos[at : at + 3] = [middle[0] + x, middle[1], scene.DESK_TOP + 0.09]
+  qpos[at + 3 : at + 7] = np.array([0.96, 0.1, 0.25, 0.0]) / np.linalg.norm(
+    [0.96, 0.1, 0.25, 0.0]
+  )
+  for _ in range(8):
+    observation, report = env.step(hold(observation.state[:, -1]))
+  pose = env.bricks(0)[brick]
+  assert report.sorted[0] == 1, pose
+  assert pose[2] < scene.DESK_TOP + scene.BINS["akrobins"].floor[2] + 0.01, pose
+  assert pose[0] - middle[0] < scene.BINS["akrobins"].floor[1] + 0.01, pose
 
 
 def test_an_episode_records_every_row_and_round_trips(tmp_path: Path) -> None:

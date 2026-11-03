@@ -169,7 +169,8 @@ Every solver and contact setting is one value, `physics.Physics`, which the rig
 applies to every scene and every episode records. `scripts/physics_bench.py`
 measures a candidate on the LEGO env on fixed seeds. The defaults come from
 MuJoCo's documentation (solver parameters, slip, integrators) and from what
-MuJoCo Menagerie's grippers use. Measured on the LEGO env at 150 Hz rows:
+MuJoCo Menagerie's grippers use. Measured on the LEGO env at 150 Hz rows with
+the clear bins (`--bins clear`):
 
 | | specialist_rlft | Default |
 | --- | --- | --- |
@@ -192,7 +193,8 @@ out of a tossed brick. Euler measures like `implicitfast` here, which MuJoCo
 recommends for stability under damping. The NoSlip solver stays off: two
 iterations cut the slip to 0.03 mm but cost a fifth of the speed, and MuJoCo
 warns about it in scenes with many contacts. A 1.33 ms step runs twice as fast
-(11x real time) and sinks the pads 1.0 mm.
+(11x real time) and sinks the pads 1.0 mm. The AkroBins, whose side walls
+collide as convex meshes, measure the same as the clear bins at the default.
 
 ## Evaluation
 
@@ -289,7 +291,10 @@ observation, report = env.reset(range(32))
 ```
 
 The 0927 desk, ported from specialist_rlft: the TILLGANG tray, a bin of each
-color with its card, and twelve 2 x 4 bricks, six of each color. A layout puts
+color, and twelve 2 x 4 bricks, six of each color. `Cfg.bins` picks the bins:
+`akrobins` (the default), a red and a blue AkroBin 30210 drawn from its CAD, or
+`clear`, the 0927 takes' clear bins with a card on each. An episode records its
+bins; one that names none was recorded with the clear bins. A layout puts
 some bricks on the tray and parks the rest in their bins: `drop` (the task: 1
 to 8 bricks dropped onto the tray, none starting inside another), `single`, and
 `pile`. A layout is a function of `(mode, seed, bricks)`, which each episode
@@ -302,9 +307,9 @@ The lens fires at exactly 30 Hz with no phase, so a frame falls on every fifth
 row, as the dataset build pairs frames with states. A brick is sorted in its
 color's bin, missorted in the other, lost off the desk. `report.success` is
 every started brick sorted, and `report.progress` the share sorted.
-`Cfg.swapped` draws every brick and bin card in the other color while physics
-and scoring keep each brick's own, so a policy that sorts both scenes reads the
-cards, not the bins' sides.
+`Cfg.swapped` draws every brick and bin in the other color, a clear bin's card
+or an AkroBin's plastic, while physics and scoring keep each brick's own. A
+policy that sorts both scenes reads the bins' colors, not their sides.
 
 ## The pick-and-place env
 

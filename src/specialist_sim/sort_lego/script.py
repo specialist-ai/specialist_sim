@@ -57,16 +57,17 @@ def _stages(hand: int) -> tuple[Stage, ...]:
 
 
 class Script:
-  """The sorting rules for the driven hands, over the bricks ``active`` names."""
+  """The sorting rules for the driven hands, over the bricks ``active`` names,
+  into bins of kind ``bins``."""
 
   def __init__(
-    self, driven: tuple[str, ...], colors: tuple[str, ...], active: BoolArray
+    self, driven: tuple[str, ...], colors: tuple[str, ...], active: BoolArray, bins: str
   ):
-    self.driven, self.colors = driven, colors
+    self.driven, self.colors, self.bins = driven, colors, bins
     self.active = active.copy()
     self.attempts = np.zeros(len(active), np.int64)
     self.reach: tuple[Float64Array, Float64Array] = (
-      np.array([scene.BIN_NEAR_FACE - scene.BIN_SIZE[0] - 0.1, -0.6, scene.DESK_TOP]),
+      np.array([scene.DESK_EDGE - 0.1, -0.6, scene.DESK_TOP]),
       np.array([scene.TRAY_CENTER[0] + 0.35, 0.6, scene.DESK_TOP + 0.5]),
     )
     self._hand = 0
@@ -152,7 +153,7 @@ class Script:
     if stage.name == "carry":
       if not holding:
         return going_home
-      drop = drop_pose(self.colors[brick])
+      drop = drop_pose(self.colors[brick], self.bins)
       return Waypoint(drop[:3], SHUT, rotation.to_matrix(drop[3:7]), bulge=ARCH)
     if stage.name == "release":
       return Waypoint(pose[hand, :3].copy(), OPEN, rotation.to_matrix(pose[hand, 3:7]))
@@ -173,10 +174,11 @@ def grasp_pose(brick: Float64Array, slot: str) -> Float64Array:
   return np.array([*position, *quaternion])
 
 
-def drop_pose(color: str) -> Float64Array:
-  """The hand state that holds a brick ``DROP`` over the middle of ``color``'s
-  bin, fingers pitched down toward the bins, ``(7,)``."""
-  middle = scene.bin_center(color) + np.array([0.0, 0.0, scene.BIN_SIZE[2] + DROP])
+def drop_pose(color: str, bins: str) -> Float64Array:
+  """The hand state that holds a brick ``DROP`` over the middle of the floor of
+  ``color``'s bin of kind ``bins``, fingers pitched down toward the bins, ``(7,)``."""
+  kind = scene.BINS[bins]
+  middle = kind.floor_middle(color) + np.array([0.0, 0.0, kind.size[2] + DROP])
   quaternion = rotation.pointing(np.array([-np.cos(PITCH), 0.0, -np.sin(PITCH)]))
   return np.array(
     [*(middle - rotation.rotate(quaternion, np.asarray(GRASP))), *quaternion]
@@ -202,7 +204,7 @@ def scripted_policy(
   assert layout is not None
   clock = env.cfg.clock
   return ScriptedPolicy(
-    Script(env.cfg.driven, env.cfg.colors, layout.active),
+    Script(env.cfg.driven, env.cfg.colors, layout.active, env.cfg.bins),
     rng,
     clock.action_dt,
     clock.n_action_steps,

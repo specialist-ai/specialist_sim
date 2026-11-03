@@ -25,6 +25,9 @@ ASSETS = Path(__file__).parent / "assets"
 RED = (0.74, 0.11, 0.09)
 BLUE = (0.03, 0.33, 0.75)
 COLOR_RGB = {"red": RED, "blue": BLUE}
+BIN_RGB = {"red": (0.74, 0.16, 0.17), "blue": (0.06, 0.19, 0.75)}
+"""The AkroBins' plastic: each bin's hue in a photo of it beside its bricks, at its bricks'
+brightness here. The blue bin is a purer blue than the bricks."""
 BRICK_FRICTION = (0.8, 0.005, 0.0001)
 TRAY_FRICTION = (0.5, 0.005, 0.0001)
 """The tray's plastic, floor and rim alike. MuJoCo takes the larger of two
@@ -63,10 +66,10 @@ def _box(
 def _container(
   spec: mujoco.MjSpec, body: mujoco.MjsBody, color: str, card: str
 ) -> None:
-  """One bin, its long side along x and the card of color ``card`` on the face
+  """One clear bin, its long side along x and the card of color ``card`` on the face
   at +x, toward the operator."""
-  length, width, height = scene.BIN_SIZE
-  half = scene.BIN_WALL / 2.0
+  length, width, height = scene.BINS["clear"].size
+  half = scene.CLEAR_WALL / 2.0
   radius, arc = 0.020, 4
   corners = ((1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0))
   outline = []
@@ -144,6 +147,109 @@ def _container(
   )
 
 
+def _akrobin_meshes(spec: mujoco.MjSpec) -> None:
+  """The AkroBin's shell, drawn from its CAD, and its two side walls as convex prisms, once
+  for both bins.
+
+  Each side wall spans the inner face to the outer flange, 8.7 mm, and in profile runs from
+  the back's outer face along the top of the wall, down its sloped front to the label lip,
+  and back along the desk. MuJoCo collides the hull of the profile's points, which bridges
+  the sloped front up to 3 mm above the real edge.
+  """
+  shell = spec.add_mesh(name="akrobin", file=str(ASSETS / "akrobin_30210.stl"))
+  shell.inertia = mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL
+  profile = np.array(
+    [
+      (-0.0689, 0.0),
+      (-0.0689, 0.0717),
+      (0.0446, 0.0717),
+      (0.0516, 0.0681),
+      (0.0566, 0.0561),
+      (0.0606, 0.0464),
+      (0.0646, 0.0380),
+      (0.0660, 0.0380),
+      (0.0660, 0.0),
+    ]
+  )
+  inner, outer = scene.BINS["akrobins"].inside[2], scene.BINS["akrobins"].size[1] / 2
+  for side, sign in (("left", 1.0), ("right", -1.0)):
+    wall = spec.add_mesh(name=f"akrobin_wall_{side}")
+    wall.uservert = np.ravel(
+      [(x, sign * across, z) for across in (inner, outer) for x, z in profile]
+    ).tolist()
+
+
+def _akrobin(body: mujoco.MjsBody, color: str, drawn: str) -> None:
+  """One AkroBin, open front toward the operator at +x, its plastic in ``drawn``'s color.
+
+  The colliders sit on the CAD's inner surfaces. The floor and the 45 degree ramp are
+  ``2 * THICK`` thick below them, as every static collider a brick can be tossed at is; the
+  walls are their real thickness, 7 mm and more, and the label lip its real 3.4 mm.
+  """
+  bins = scene.BINS["akrobins"]
+  back, front, top = bins.floor
+  half_width = bins.inside[2]
+  body.add_geom(
+    name=f"{color}_bin_shell",
+    type=mujoco.mjtGeom.mjGEOM_MESH,
+    meshname="akrobin",
+    rgba=[*BIN_RGB[drawn], 1.0],
+    contype=0,
+    conaffinity=0,
+    group=2,
+  )
+  # The same plastic as the tray: a brick slides down the ramp, tan 45 = 1, at its own 0.8.
+  collider = (*BIN_RGB[drawn], 0.3)
+  _box(
+    body,
+    f"{color}_bin_floor",
+    ((back + front) / 2, 0.0, top - THICK),
+    ((front - back) / 2 + 0.005, half_width, THICK),
+    rgba=collider,
+    friction=TRAY_FRICTION,
+  )
+  # The ramp's face rises at 45 degrees from the floor's front edge, z = x - (front - top),
+  # to the label lip's back face.
+  ramp = front - top
+  foot, head = front - 0.005, bins.inside[1] - 0.0034
+  normal = np.array([-1.0, 0.0, 1.0]) / np.sqrt(2.0)
+  middle = np.array([(foot + head) / 2, 0.0, (foot + head) / 2 - ramp]) - THICK * normal
+  _box(
+    body,
+    f"{color}_bin_ramp",
+    middle,
+    ((head - foot) / 2 * np.sqrt(2.0) + 0.002, half_width, THICK),
+    quat=[np.cos(np.pi / 8), 0.0, -np.sin(np.pi / 8), 0.0],
+    rgba=collider,
+    friction=TRAY_FRICTION,
+  )
+  _box(
+    body,
+    f"{color}_bin_lip",
+    (bins.inside[1] - 0.0017, 0.0, (0.011 + 0.038) / 2),
+    (0.0017, bins.size[1] / 2, (0.038 - 0.011) / 2),
+    rgba=collider,
+    friction=TRAY_FRICTION,
+  )
+  _box(
+    body,
+    f"{color}_bin_back",
+    ((back - bins.size[0] / 2) / 2, 0.0, bins.size[2] / 2),
+    ((back + bins.size[0] / 2) / 2, bins.size[1] / 2, bins.size[2] / 2),
+    rgba=collider,
+    friction=TRAY_FRICTION,
+  )
+  for side in ("left", "right"):
+    body.add_geom(
+      name=f"{color}_bin_wall_{side}",
+      type=mujoco.mjtGeom.mjGEOM_MESH,
+      meshname=f"akrobin_wall_{side}",
+      group=3,
+      rgba=collider,
+      friction=TRAY_FRICTION,
+    )
+
+
 def _tray(root: mujoco.MjsBody) -> None:
   """The tray, its long side along y: a flat floor and a rim whose inner wall slopes up from
   the floor at ``TRAY_WALL_ANGLE`` to a flat top ``TRAY_LIP`` above the desk.
@@ -210,9 +316,10 @@ def _tray(root: mujoco.MjsBody) -> None:
     )
 
 
-def fixtures(swapped: bool = False) -> mujoco.MjSpec:
-  """The desk, the tray and the two bins, standing where the takes put them,
-  each bin wearing the other's card when ``swapped``."""
+def fixtures(bins: str, swapped: bool = False) -> mujoco.MjSpec:
+  """The desk, the tray and the two bins of kind ``bins``, standing where the
+  takes put them, each bin wearing the other's color when ``swapped``: a clear
+  bin its card, an AkroBin its plastic."""
   spec = mujoco.MjSpec()
   spec.compiler.texturedir = str(ASSETS)
   root = spec.worldbody.add_body(name="fixtures")
@@ -250,10 +357,17 @@ def fixtures(swapped: bool = False) -> mujoco.MjSpec:
         conaffinity=0,
       )
   _tray(root)
+  if bins == "akrobins":
+    _akrobin_meshes(spec)
   for color in scene.COLORS:
-    body = root.add_body(name=f"{color}_bin", pos=[*scene.BINS[color], scene.DESK_TOP])
-    card = scene.COLORS[1 - scene.COLORS.index(color)] if swapped else color
-    _container(spec, body, color, card)
+    body = root.add_body(
+      name=f"{color}_bin", pos=[*scene.BINS[bins].middle(color), scene.DESK_TOP]
+    )
+    drawn = scene.COLORS[1 - scene.COLORS.index(color)] if swapped else color
+    if bins == "akrobins":
+      _akrobin(body, color, drawn)
+    else:
+      _container(spec, body, color, drawn)
   root.add_light(
     pos=[0.4, 0.0, 1.2], dir=[-0.4, 0.0, -1.0], diffuse=[0.7, 0.7, 0.7], castshadow=True
   )
@@ -354,16 +468,16 @@ def brick(name: str, color: str, at: tuple[float, float, float]) -> mujoco.MjSpe
   return spec
 
 
-def spec(colors: tuple[str, ...], swapped: bool = False) -> mujoco.MjSpec:
+def spec(colors: tuple[str, ...], bins: str, swapped: bool = False) -> mujoco.MjSpec:
   """The fixtures and a brick of each of ``colors``, parked in its own bin.
-  ``swapped`` draws every brick and bin card in the other color. Physics and
+  ``swapped`` draws every brick and bin in the other color. Physics and
   scoring keep each brick's own, so the brick drawn blue belongs in the bin
-  that wears the blue card."""
+  drawn blue."""
   other = dict(zip(scene.COLORS, scene.COLORS[::-1], strict=True))
-  room = fixtures(swapped)
+  room = fixtures(bins, swapped)
   count = dict.fromkeys(scene.COLORS, 0)
   for index, color in enumerate(colors):
-    at = scene.parked(color, count[color])
+    at = scene.BINS[bins].parked(color, count[color])
     count[color] += 1
     drawn = other[color] if swapped else color
     room.attach(

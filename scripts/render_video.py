@@ -45,7 +45,10 @@ def main() -> None:
   recorded = episode.load(args.episode)
   meta = recorded.meta
   cfg = Cfg(
-    render=False, colors=tuple(meta["colors"]), swapped=meta.get("swapped", False)
+    render=False,
+    colors=tuple(meta["colors"]),
+    swapped=meta.get("swapped", False),
+    bins=meta.get("bins", "clear"),
   )
   rig = SortLegoEnv(cfg).rig
   model, data = rig.model, mujoco.MjData(rig.model)

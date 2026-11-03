@@ -173,19 +173,21 @@ MAKERS: dict[str, Callable[[np.random.Generator, int], Placement]] = {
 }
 
 
-def parked(colors: tuple[str, ...]) -> Float64Array:
-  """A spot on its own bin's floor for every brick, lying flat, ``(k, 7)``."""
+def parked(colors: tuple[str, ...], bins: str) -> Float64Array:
+  """A spot on its own bin's floor for every brick, lying flat, ``(k, 7)``, in
+  bins of kind ``bins``."""
   out = np.zeros((len(colors), 7))
   for index, color in enumerate(colors):
-    out[index, :3] = scene.parked(color, colors[:index].count(color))
+    out[index, :3] = scene.BINS[bins].parked(color, colors[:index].count(color))
     out[index, 3] = 1.0
   return out
 
 
 def draw(
-  mode: str, seed: int, colors: tuple[str, ...], bricks: int | None = None
+  mode: str, seed: int, colors: tuple[str, ...], bins: str, bricks: int | None = None
 ) -> Layout:
-  """One tray laid out ``mode``'s way from ``seed``, ``bricks`` of ``colors`` on it."""
+  """One tray laid out ``mode``'s way from ``seed``, ``bricks`` of ``colors`` on
+  it and the rest parked in bins of kind ``bins``."""
   if mode not in MAKERS:
     raise ValueError(f"no layout {mode!r}, only {MODES}")
   rng = np.random.default_rng(seed)
@@ -197,6 +199,6 @@ def draw(
     raise ValueError(f"{count} bricks on a tray of {len(colors)}")
   active = np.zeros(len(colors), np.bool_)
   active[rng.choice(len(colors), count, replace=False)] = True
-  poses = parked(colors)
+  poses = parked(colors, bins)
   poses[active, :2], poses[active, 2], poses[active, 3:] = MAKERS[mode](rng, count)
   return Layout(mode, seed, bricks, poses, active)

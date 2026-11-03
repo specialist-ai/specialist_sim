@@ -24,7 +24,7 @@ from specialist_sim.embodiment import Embodiment, Floating
 from specialist_sim.gripper import SLOTS
 from specialist_sim.physics import Physics
 from specialist_sim.rig import Clock, Observation, Rig
-from specialist_sim.sort_lego import assets, initial, task
+from specialist_sim.sort_lego import assets, initial, scene, task
 from specialist_sim.sort_lego.initial import Layout
 
 __all__ = ["CLOCK", "COLORS", "LENS", "Cfg", "Report", "SortLegoEnv"]
@@ -65,11 +65,18 @@ class Cfg:
   """How many bricks a tray starts with. ``None`` lets the mode draw its count."""
   colors: tuple[str, ...] = COLORS
   swapped: bool = False
-  """Whether every brick and bin card is drawn in the other color."""
+  """Whether every brick and bin is drawn in the other color."""
+  bins: str = "akrobins"
+  """The kind of bin, a name in ``scene.BINS``: ``akrobins``, the rig's, or
+  ``clear``, the 0927 takes' bins with a card on each."""
+
+  def __post_init__(self) -> None:
+    if self.bins not in scene.BINS:
+      raise ValueError(f"no bins {self.bins!r}, only {tuple(scene.BINS)}")
 
   def rig(self) -> rig.Cfg:
     return rig.Cfg(
-      scene=partial(assets.spec, self.colors, self.swapped),
+      scene=partial(assets.spec, self.colors, self.bins, self.swapped),
       embodiment=self.embodiment,
       clock=self.clock,
       physics=self.physics,
@@ -146,11 +153,11 @@ class SortLegoEnv:
       initial.starts(cfg.driven) if hands is None else np.asarray(hands, np.float64)
     )
     for env_idx, seed in zip(chosen, seeds, strict=True):
-      layout = initial.draw(cfg.mode, seed, cfg.colors, cfg.bricks)
+      layout = initial.draw(cfg.mode, seed, cfg.colors, cfg.bins, cfg.bricks)
       for tries in range(1, CLEAR_TRIES):
         if hands is None or not self._overlaps(env_idx, layout, start):
           break
-        layout = initial.draw(cfg.mode, seed + tries, cfg.colors, cfg.bricks)
+        layout = initial.draw(cfg.mode, seed + tries, cfg.colors, cfg.bins, cfg.bricks)
       self.layouts[env_idx] = layout
       self.place(env_idx, layout.poses, start)
     self.rig.settle(chosen, initial.SETTLE[cfg.mode])
@@ -169,7 +176,9 @@ class SortLegoEnv:
     """How one env's tray stands now."""
     layout = self.layouts[env_idx]
     assert layout is not None
-    return task.score(self.bricks(env_idx), self.cfg.colors, layout.active)
+    return task.score(
+      self.bricks(env_idx), self.cfg.colors, layout.active, self.cfg.bins
+    )
 
   def bricks(self, env_idx: int) -> Float64Array:
     """Every brick's pose in one env, ``(k, 7)``."""
@@ -189,6 +198,7 @@ class SortLegoEnv:
       "active": layout.active.tolist(),
       "colors": list(cfg.colors),
       "swapped": cfg.swapped,
+      "bins": cfg.bins,
       "driven": list(cfg.driven),
       "row_hz": 1.0 / cfg.clock.row_dt,
       "physics": cfg.physics.as_dict(),

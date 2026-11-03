@@ -18,17 +18,9 @@ LOST = 0.05
 """How far below the desk top a brick has fallen off the desk, meters."""
 
 
-def in_bin(position: Float64Array) -> str | None:
-  """The bin a point lies inside, below its rim, or None."""
-  for color, (x, y) in scene.BINS.items():
-    inside = (
-      abs(position[0] - x) < scene.BIN_SIZE[0] / 2 - scene.BIN_WALL
-      and abs(position[1] - y) < scene.BIN_SIZE[1] / 2 - scene.BIN_WALL
-      and scene.DESK_TOP < position[2] < scene.DESK_TOP + scene.BIN_SIZE[2]
-    )
-    if inside:
-      return color
-  return None
+def in_bin(position: Float64Array, bins: str) -> str | None:
+  """The bin of kind ``bins`` a point lies inside, below its rim, or None."""
+  return scene.BINS[bins].holding(position)
 
 
 def on_tray(position: Float64Array) -> bool:
@@ -63,12 +55,15 @@ class Score:
     return {**asdict(self), "cleared": self.cleared, "progress": self.progress}
 
 
-def score(bricks: Float64Array, colors: tuple[str, ...], active: BoolArray) -> Score:
+def score(
+  bricks: Float64Array, colors: tuple[str, ...], active: BoolArray, bins: str
+) -> Score:
   """The tray's standing from every brick's pose ``(k, 7)``, their ``colors``,
-  and which of them started on the tray, ``active`` ``(k,)``."""
+  and which of them started on the tray, ``active`` ``(k,)``, sorting into
+  bins of kind ``bins``."""
   counts = {"sorted": 0, "missorted": 0, "on_tray": 0, "lost": 0}
   for pose, color in zip(bricks[active], np.array(colors)[active], strict=True):
-    landed = in_bin(pose[:3])
+    landed = in_bin(pose[:3], bins)
     if landed is not None:
       counts["sorted" if landed == color else "missorted"] += 1
     elif pose[2] < scene.DESK_TOP - LOST:

@@ -132,7 +132,8 @@ def _gather(
 
 
 def test_the_console_and_the_headset_round_trip() -> None:
-  env = SortLegoEnv(Cfg(render=False))
+  # The clear bins wear the scene's only textures, their cards.
+  env = SortLegoEnv(Cfg(render=False, bins="clear"))
   env.reset([0])
   port = _free_port()
   console = server.Page(env.rig.model, port)

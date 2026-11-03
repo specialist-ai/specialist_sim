@@ -54,7 +54,7 @@ FOCUS = np.array([scene.TRAY_CENTER[0] - 0.08, scene.TRAY_CENTER[1], scene.DESK_
 """What the console's desktop view looks at."""
 PANEL = np.array(
   [
-    scene.BIN_NEAR_FACE - scene.BIN_SIZE[0] - 0.05,
+    scene.DESK_EDGE - 0.05,
     scene.DESK_CENTER[1],
     scene.DESK_TOP + 0.40,
   ]
