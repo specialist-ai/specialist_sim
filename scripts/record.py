@@ -219,7 +219,7 @@ def main() -> None:
         "detail": f"{env.cfg.mode} tray {seed} · {kept} kept · {note}",
         "headset": "not connected"
         if inputs is None
-        else f"tracking_error {', '.join(tracked) or 'no controller'}",
+        else f"tracking {', '.join(tracked) or 'no controller'}",
         "hands": {
           hand: {
             "held": grabs[hand].hold is not None,
