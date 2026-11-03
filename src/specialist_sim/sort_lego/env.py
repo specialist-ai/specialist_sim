@@ -145,17 +145,20 @@ class SortLegoEnv:
   ) -> tuple[Observation, Report]:
     """Open an episode in every env, or only in the ones named, each on the
     layout its seed draws. The hands start where the task puts them or, given
-    ``hands`` ``(hands, 8)``, there, and then seeds that would put a brick in a
-    hand are passed over, and ``layouts`` names the seed laid."""
+    ``hands``, there: ``(hands, 8)`` for every env, or ``(envs, hands, 8)`` one
+    start per env opened. Then seeds that would put a brick in a hand are passed
+    over, and ``layouts`` names the seed laid."""
     cfg = self.cfg
     chosen = list(range(self.num_envs)) if env_ids is None else list(env_ids)
-    start = (
-      initial.starts(cfg.driven) if hands is None else np.asarray(hands, np.float64)
+    given = None if hands is None else np.asarray(hands, np.float64)
+    starts = np.broadcast_to(
+      initial.starts(cfg.driven) if given is None else given,
+      (len(chosen), len(SLOTS), 8),
     )
-    for env_idx, seed in zip(chosen, seeds, strict=True):
+    for env_idx, seed, start in zip(chosen, seeds, starts, strict=True):
       layout = initial.draw(cfg.mode, seed, cfg.colors, cfg.bins, cfg.bricks)
       for tries in range(1, CLEAR_TRIES):
-        if hands is None or not self._overlaps(env_idx, layout, start):
+        if given is None or not self._overlaps(env_idx, layout, start):
           break
         layout = initial.draw(cfg.mode, seed + tries, cfg.colors, cfg.bins, cfg.bricks)
       self.layouts[env_idx] = layout

@@ -120,6 +120,15 @@ def test_hands_standing_where_a_brick_would_start_pass_over_that_seed() -> None:
   assert env.layouts[0] is not None and env.layouts[0].seed > 11
 
 
+def test_each_env_can_start_its_hands_somewhere_of_its_own() -> None:
+  env = SortLegoEnv(replace(BLIND, mode="single"), 2)
+  hands = np.stack([initial.starts(SLOTS)] * 2)
+  hands[1, 1, 2] += 0.05
+  observation, _ = env.reset([3, 4], hands=hands)
+  heights = observation.state[:, 0, 1, 2]
+  assert heights[1] - heights[0] == pytest.approx(0.05, abs=2e-3)
+
+
 def test_the_swapped_scene_draws_bricks_and_cards_in_the_other_color() -> None:
   plain = mujoco.MjSpec.compile(assets.spec(COLORS, "clear"))
   swapped = mujoco.MjSpec.compile(assets.spec(COLORS, "clear", swapped=True))
