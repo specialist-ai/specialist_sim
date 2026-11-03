@@ -1,7 +1,7 @@
 [project]
 name = "specialist-sim"
 version = "1.0.0"
-description = "A simulated capture rig for evaluating manipulation policies"
+description = "A simulated capture rig for collecting demonstrations and evaluating manipulation policies"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
@@ -15,9 +15,13 @@ dependencies = [
 [project.optional-dependencies]
 # A recorded session, read back and replayed into the environment.
 dataset = ["specialist-dataset", "av>=13"]
+# The handheld grippers on a Quest: the page's socket and the command line.
+handheld = ["websockets>=13", "tyro>=1.0"]
 
 [project.scripts]
+sim-record = "specialist_sim.scripts.record:main"
 sim-replay = "specialist_sim.scripts.replay:main"
+sim-render = "specialist_sim.scripts.render_video:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]

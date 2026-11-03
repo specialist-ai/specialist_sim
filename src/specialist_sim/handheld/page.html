@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sim data collection</title>
+<style>
+  :root { --bg: #202124; --card: rgba(32, 33, 36, 0.85); --line: #3c3d42; --text: #e8eaed; --dim: #9aa0a6; --go: #1a73e8; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 14px system-ui, sans-serif; }
+  [hidden] { display: none !important; }
+  #view { position: fixed; inset: 0; }
+  #view canvas { display: block; }
+  .card { position: fixed; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; backdrop-filter: blur(6px); }
+  #status { top: 16px; left: 16px; max-width: min(420px, calc(100vw - 66px)); }
+  #state { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #detail, #xr-note { color: var(--dim); margin-top: 4px; }
+  #xr { bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; max-width: calc(100vw - 66px); }
+  #xr-note:empty { display: none; }
+  #enter { display: flex; gap: 8px; }
+  button { font: inherit; font-size: 16px; font-weight: 600; color: var(--text); background: var(--go); border: 0; border-radius: 8px; padding: 12px 22px; cursor: pointer; }
+  button:disabled { background: #35363a; color: var(--dim); cursor: default; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="status" class="card"><div id="state">Connecting…</div><div id="detail"></div></div>
+<div id="xr" class="card">
+  <div id="enter"><button id="enter-vr" disabled>Enter VR</button><button id="enter-ar" disabled>Enter AR</button></div>
+  <div id="xr-note"></div>
+</div>
+<script type="module">
+// The sim in the room frame (z up). On a desktop it is drawn as it is, around an orbiting
+// camera; in an immersive session the room group carries it into the headset's local-floor
+// space (y up) through the server's anchor.
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+
+const $ = (id) => document.getElementById(id);
+
+const view = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local-floor");
+view.appendChild(renderer.domElement);
+
+// Plain requestSession buttons: three.js's own buttons also "offer" a session to the Quest's
+// browser, and with two of them the second offer cancels the first.
+const entries = { "immersive-vr": $("enter-vr"), "immersive-ar": $("enter-ar") };
+const entryLabel = (mode) => `Enter ${mode.slice(10).toUpperCase()}`;
+let entered = null;
+for (const [mode, button] of Object.entries(entries)) {
+  button.addEventListener("click", async () => {
+    if (renderer.xr.isPresenting) { await renderer.xr.getSession().end(); return; }
+    try {
+      const session = await navigator.xr.requestSession(mode, { requiredFeatures: ["local-floor"] });
+      entered = mode;
+      await renderer.xr.setSession(session);
+    } catch (error) {
+      $("xr-note").textContent = `Could not enter: ${error.message}`;
+    }
+  });
+}
+(async () => {
+  if (!navigator.xr) {
+    $("enter").hidden = true;
+    $("xr-note").textContent = window.isSecureContext
+      ? "This browser has no WebXR: open the page in the Quest's browser."
+      : "WebXR needs https or localhost: connect the Quest over USB (adb reverse) or serve with --cert.";
+    return;
+  }
+  let found = false;
+  for (const [mode, button] of Object.entries(entries)) {
+    button.disabled = !(await navigator.xr.isSessionSupported(mode).catch(() => false));
+    found ||= !button.disabled;
+  }
+  $("enter").hidden = !found;
+  $("xr-note").textContent = found ? "" : "No headset here: open this page in the Quest's browser.";
+})();
+
+const scene = new THREE.Scene();
+const sky = new THREE.Color(0x202124);
+scene.background = sky;
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+const room = new THREE.Group();  // the room frame
+room.matrixAutoUpdate = false;
+scene.add(room);
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 30);
+camera.up.set(0, 0, 1);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+
+// Lights ride the room frame, so they fall the same way on a desktop and in the headset.
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+const fill = new THREE.DirectionalLight(0xffffff, 0.8);
+room.add(key, key.target, fill, fill.target);
+
+// The room around the setup, drawn only in VR and on the desktop: passthrough shows the real one.
+const shell = new THREE.Group();
+room.add(shell);
+
+let meshes = [], moving = [];
+const immersive = () => renderer.xr.isPresenting;
+
+function unpacked(text, type) {
+  const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  return new type(bytes.buffer);
+}
+
+function place(object, pose, at) {
+  object.position.set(pose[at], pose[at + 1], pose[at + 2]);
+  object.quaternion.set(pose[at + 4], pose[at + 5], pose[at + 6], pose[at + 3]);  // wxyz to xyzw
+}
+
+// Each corner's normal averages the faces round its vertex that meet its own face at under
+// CREASE. computeVertexNormals smears a CAD part's sharp edges across its flat walls, and
+// toCreasedNormals welds corners on a 1 cm grid, too coarse for meshes in meters.
+const CREASE = Math.cos(THREE.MathUtils.degToRad(40));
+function creased(vertices, faces) {
+  const count = faces.length / 3;
+  const area = new Float32Array(3 * count), unit = new Float32Array(3 * count);
+  const around = Array.from({ length: vertices.length / 3 }, () => []);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let face = 0; face < count; face++) {
+    a.fromArray(vertices, 3 * faces[3 * face]);
+    b.fromArray(vertices, 3 * faces[3 * face + 1]);
+    c.fromArray(vertices, 3 * faces[3 * face + 2]);
+    c.sub(b).cross(a.sub(b));  // its length twice the face's area, which weights the average
+    c.toArray(area, 3 * face);
+    c.normalize().toArray(unit, 3 * face);
+    for (let corner = 0; corner < 3; corner++) around[faces[3 * face + corner]].push(face);
+  }
+  const position = new Float32Array(9 * count), normal = new Float32Array(9 * count);
+  for (let face = 0; face < count; face++) {
+    for (let corner = 0; corner < 3; corner++) {
+      const vertex = faces[3 * face + corner], at = 9 * face + 3 * corner;
+      position.set(vertices.subarray(3 * vertex, 3 * vertex + 3), at);
+      a.set(0, 0, 0);
+      for (const other of around[vertex]) {
+        const dot = unit[3 * face] * unit[3 * other] + unit[3 * face + 1] * unit[3 * other + 1]
+          + unit[3 * face + 2] * unit[3 * other + 2];
+        if (dot >= CREASE) a.add(b.fromArray(area, 3 * other));
+      }
+      a.normalize().toArray(normal, at);
+    }
+  }
+  const shape = new THREE.BufferGeometry();
+  shape.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  shape.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+  return shape;
+}
+
+function buildShell(focus) {
+  shell.clear();
+  const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x8a8178, roughness: 0.9 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), floorMaterial);
+  ground.position.set(focus[0], focus[1], 0);
+  const grid = new THREE.GridHelper(6, 12, 0x6d655d, 0x6d655d);
+  grid.rotation.x = Math.PI / 2;
+  grid.position.set(focus[0], focus[1], 0.001);
+  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xd9d6cf, roughness: 1.0, side: THREE.DoubleSide });
+  const height = 2.7, half = 3;
+  for (const [dx, dy, turn] of [[-half, 0, Math.PI / 2], [half, 0, Math.PI / 2], [0, -half, 0], [0, half, 0]]) {
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(2 * half, height), wallMaterial);
+    wall.rotation.set(Math.PI / 2, 0, turn, "ZXY");  // stood up about x, then turned about the vertical
+    wall.position.set(focus[0] + dx, focus[1] + dy, height / 2);
+    shell.add(wall);
+  }
+  shell.add(ground, grid);
+}
+
+function build(message) {
+  for (const mesh of meshes) room.remove(mesh);
+  const poses = unpacked(message.poses, Float32Array);
+  meshes = message.geoms.map((geom, row) => {
+    let shape;
+    if (geom.kind === "box") {
+      shape = new THREE.BoxGeometry(2 * geom.size[0], 2 * geom.size[1], 2 * geom.size[2]);
+    } else {
+      shape = creased(unpacked(geom.vertices, Float32Array), unpacked(geom.faces, Uint32Array));
+    }
+    const [r, g, b] = geom.color;
+    const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(r, g, b), roughness: 0.75 });
+    const mesh = new THREE.Mesh(shape, material);
+    place(mesh, poses, 7 * row);
+    room.add(mesh);
+    return mesh;
+  });
+  moving = message.moving;
+  const focus = new THREE.Vector3(...message.focus);
+  key.position.set(focus.x - 0.4, focus.y + 0.3, focus.z + 1.6);
+  key.target.position.copy(focus);
+  fill.position.set(focus.x - 1.0, focus.y + 0.8, focus.z + 0.8);
+  fill.target.position.copy(focus);
+  orbit.target.copy(focus);
+  camera.position.set(focus.x - 0.75, focus.y, focus.z + 0.55);
+  buildShell(message.focus);
+}
+
+// In a session the status panel trails the head's turn, below the eyes.
+const head = new THREE.Vector3(), ahead = new THREE.Vector3(), turn = new THREE.Quaternion();
+const board = document.createElement("canvas");
+board.width = 1024; board.height = 192;
+const panel = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.24, 0.045),
+  new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(board), transparent: true, depthTest: false }),
+);
+panel.renderOrder = 1;
+panel.visible = false;
+scene.add(panel);
+let shownStatus = "", ended = 0;
+function show(status) {
+  const text = JSON.stringify(status);
+  if (text === shownStatus) return;
+  shownStatus = text;
+  $("state").textContent = status.headline;
+  $("status").style.background = status.color;
+  $("detail").textContent = status.detail;
+  const context = board.getContext("2d");
+  context.clearRect(0, 0, board.width, board.height);
+  context.fillStyle = status.color;
+  context.fillRect(0, 0, board.width, board.height);
+  context.fillStyle = "#ffffff";
+  context.font = "bold 64px system-ui, sans-serif";
+  context.fillText(status.headline, 28, 76);
+  context.font = "38px system-ui, sans-serif";
+  context.fillText(status.detail, 28, 140);
+  context.textAlign = "right";
+  context.fillText(status.buttons, board.width - 28, 140);
+  context.textAlign = "left";
+  context.fillRect(0, 168, board.width * status.progress, 24);
+  panel.material.map.needsUpdate = true;
+  if (status.ended !== ended && immersive()) {
+    for (const source of renderer.xr.getSession().inputSources) source.gamepad?.hapticActuators?.[0]?.pulse(0.7, 120);
+  }
+  ended = status.ended;
+}
+
+const models = new XRControllerModelFactory();
+for (const index of [0, 1]) {
+  const grip = renderer.xr.getControllerGrip(index);
+  grip.add(models.createControllerModel(grip));
+  scene.add(grip);
+}
+
+let recenterNext = false;
+renderer.xr.addEventListener("sessionstart", () => {
+  recenterNext = true;  // stand the scene in front of the head as soon as the session reports it
+  for (const [mode, button] of Object.entries(entries)) {
+    button.disabled = mode !== entered;
+    button.textContent = mode === entered ? `Exit ${mode.slice(10).toUpperCase()}` : entryLabel(mode);
+  }
+  const passthrough = renderer.xr.getSession().environmentBlendMode !== "opaque";
+  scene.background = passthrough ? null : new THREE.Color(0xbfc8d0);
+  shell.visible = !passthrough;
+  panel.visible = true;
+});
+renderer.xr.addEventListener("sessionend", () => {
+  entered = null;
+  for (const [mode, button] of Object.entries(entries)) { button.disabled = false; button.textContent = entryLabel(mode); }
+  scene.background = sky;
+  shell.visible = true;
+  panel.visible = false;
+  room.matrix.identity();
+  room.matrixWorldNeedsUpdate = true;
+});
+
+// The socket reconnects every second, so a restarted server picks up the open session.
+let socket;
+const send = (message) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
+function connect() {
+  socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/`);
+  socket.onopen = () => { $("state").textContent = "Loading the scene…"; };
+  socket.onclose = () => {
+    show({ headline: "Disconnected", color: "rgba(30, 30, 30, 0.8)", detail: "Waiting for the server…", buttons: "", progress: 0, ended });
+    setTimeout(connect, 1000);
+  };
+  socket.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === "scene") {
+      build(message);
+    } else if (message.type === "frame") {
+      const poses = unpacked(message.poses, Float32Array);
+      moving.forEach((row, at) => place(meshes[row], poses, 7 * at));
+      if (immersive()) { room.matrix.fromArray(message.anchor); room.matrixWorldNeedsUpdate = true; }
+      show(message.status);
+    }
+  };
+}
+connect();
+
+function pose(transform) {
+  const p = transform.position, q = transform.orientation;
+  return [p.x, p.y, p.z, q.w, q.x, q.y, q.z];
+}
+
+renderer.setAnimationLoop((time, frame) => {
+  if (frame) {
+    const space = renderer.xr.getReferenceSpace();
+    const viewer = frame.getViewerPose(space);
+    if (viewer) {
+      const { position, orientation } = viewer.transform;
+      head.set(position.x, position.y, position.z);
+      ahead.set(0, 0, -1).applyQuaternion(turn.copy(orientation)).setY(0).setLength(0.6).add(head);
+      panel.position.lerp(ahead.setY(head.y - 0.15), 0.05);
+      panel.lookAt(head);
+      const tracked = {};
+      for (const source of frame.session.inputSources) {
+        if (!source.gripSpace || !source.gamepad || !["left", "right"].includes(source.handedness)) continue;
+        const grip = frame.getPose(source.gripSpace, space);
+        if (!grip) continue;
+        const buttons = source.gamepad.buttons;
+        tracked[source.handedness] = {
+          pose: pose(grip.transform),
+          trigger: buttons[0] ? buttons[0].value : 0,
+          buttons: buttons.map((button) => button.pressed),
+        };
+      }
+      send({ type: "input", t: time / 1000, head: pose(viewer.transform), hands: tracked });
+      if (recenterNext) { send({ type: "command", name: "recenter" }); recenterNext = false; }
+    }
+  } else {
+    orbit.update();
+  }
+  renderer.render(scene, camera);
+});
+
+new ResizeObserver(() => {
+  const { clientWidth: width, clientHeight: height } = view;
+  if (immersive() || !width || !height) return;
+  renderer.setSize(width, height);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+}).observe(view);
+</script>
+</body>
+</html>

@@ -1,8 +1,9 @@
 # specialist_sim
 
-A simulated capture rig for evaluating manipulation policies: grippers on
-their embodiment, in whatever room a task gives them. Two tasks come with it,
-LEGO sorting and pick-and-place.
+A simulated capture rig for collecting demonstrations and evaluating
+manipulation policies: grippers on their embodiment, in whatever room a task
+gives them. Two tasks come with it, LEGO sorting and pick-and-place, and
+demonstrations are recorded with a Quest.
 
 ## Setup
 
@@ -14,7 +15,9 @@ uv sync --all-extras
 uv run pytest
 ```
 
-The `dataset` extra adds the take replay and PyAV, which films a replay.
+The `handheld` extra adds the Quest page's socket and `sim-record`'s command
+line. The `dataset` extra adds the take replay and PyAV, which films an episode
+or a replay.
 
 ## The lenses
 
@@ -125,12 +128,48 @@ and `tracking_error`, beside the `time_limit`, `n_episodes`, `env.describe()`
 and a `revision` that hashes the compiled model, the description and the
 source. A rollout is deterministic: the same seeds give the same outcomes.
 
-## Episodes
+## Recording demonstrations
+
+```bash
+uv run --extra handheld sim-record sort-lego --out ~/recordings/NAME
+uv run --extra handheld sim-record pick-place --out ~/recordings/NAME
+```
+
+Each task is a subcommand and its fields are its flags, `sim-record sort-lego
+--mode pile`.
+
+1. Connect the headset over USB; the run keeps `adb reverse tcp:8012 tcp:8012`
+   in place. Over Wi-Fi, serve with `--cert` and `--key`.
+2. Open `http://localhost:8012` in the headset's browser. The same address on
+   this machine shows the scene and the status.
+3. Press **Enter VR** or **Enter AR**. Each gripper rides its controller, held
+   by its handle.
+
+The left controller starts and the right one ends.
+
+| Action | Quest |
+| --- | --- |
+| Close the jaws | Trigger |
+| Paused: record | X |
+| Recenter the scene in front of the head | Y |
+| Recording: keep the episode, lay a new layout, pause | A |
+| Recording: drop the episode, record a new layout | B |
+
+The fingers run on `xr.FINGER`, a servo critically damped at 25 Hz for a
+demonstrator's grip.
+
+### Episodes
 
 `<name>.npz` (`episode.py`) holds, per row, the `timestamp`, the hands as they
 stood (`state`), the setpoints they chased (`setpoint`) and `qpos`, and a JSON
 `meta` that `env.make` stands the env again from. No image is
 stored. `episode.joined` puts an episode's steps end to end.
+
+```bash
+MUJOCO_GL=egl uv run --extra dataset sim-render ~/recordings/NAME/EPISODE.npz --out video.mp4
+```
+
+films an episode: an overview of its scene beside each hand's wrist lens.
 
 ## The LEGO sorting task
 
