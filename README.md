@@ -1,8 +1,8 @@
 # specialist_sim
 
 A simulated capture rig for evaluating manipulation policies: grippers on
-their embodiment, in whatever room a task gives them. Pick-and-place comes
-with it.
+their embodiment, in whatever room a task gives them. Two tasks come with it,
+LEGO sorting and pick-and-place.
 
 ## Setup
 
@@ -113,6 +113,7 @@ room.
 
 One set of solver and contact settings applies to every room: `IMPRATIO`,
 `SOLREF` and `SOLIMP`, in `env.py`.
+`tests/test_physics_settings.py` holds them to what they are for.
 
 ## Evaluation
 
@@ -130,6 +131,22 @@ source. A rollout is deterministic: the same seeds give the same outcomes.
 stood (`state`), the setpoints they chased (`setpoint`) and `qpos`, and a JSON
 `meta` that `env.make` stands the env again from. No image is
 stored. `episode.joined` puts an episode's steps end to end.
+
+## The LEGO sorting task
+
+```python
+from specialist_sim.env import Cfg, Env
+from specialist_sim.tasks.sort_lego import SortLego
+
+env = Env(SortLego(bricks=1), Cfg(driven=("right",)), num_envs=32)
+observation, info = env.reset(range(32))
+```
+
+A desk with a tray, a red and a blue AkroBin 30210, and twelve 2 x 4 bricks.
+A layout, `drop` (the task) or `pile`, puts 1 to 8 bricks on the tray and parks
+the rest in their bins. A brick is sorted in its color's bin, missorted in the
+other, or lost below the desk. `info["counts"]` holds `started`, `sorted`,
+`missorted`, `on_tray` and `lost`; success is every started brick sorted.
 
 ## The pick-and-place task
 
