@@ -66,7 +66,7 @@
     <div id="lenses"></div>
   </section>
   <section class="dim">
-    <span>In the headset: squeeze the grip to bind a gripper, again to release it; the trigger closes it ·
+    <span>In the headset: each gripper rides its controller; the trigger closes it ·
       A records, and while recording keeps the episode and records the next · B drops it and pauses on a
       new tray · X recenters · left stick slides the scene · right stick raises it (up, down) and turns it
       (left, right)</span>
@@ -253,7 +253,6 @@ function build(message) {
     const mesh = new THREE.Mesh(shape, material);
     mesh.castShadow = moves.has(row);
     mesh.receiveShadow = !moves.has(row);
-    mesh.userData.hand = geom.hand;
     place(mesh, poses, 7 * row);
     room.add(mesh);
     return mesh;
@@ -331,11 +330,7 @@ function show(status) {
   for (const hand of hands) {
     const state = status.hands[hand];
     const shown = $(`hand-${hand}`);
-    if (shown && state) shown.textContent = `${state.held ? "bound" : "free"} · jaw ${state.opening.toFixed(2)} rad`;
-  }
-  for (const mesh of meshes) {
-    const hand = hands[mesh.userData.hand];
-    mesh.material.emissive.setHex(hand && status.hands[hand]?.held ? 0x1a3a66 : 0x000000);
+    if (shown && state) shown.textContent = `jaw ${state.opening.toFixed(2)} rad`;
   }
   const context = board.getContext("2d");
   context.clearRect(0, 0, board.width, board.height);
@@ -478,7 +473,6 @@ renderer.setAnimationLoop((time, frame) => {
         tracked[source.handedness] = {
           pose: pose(grip.transform),
           trigger: buttons[0] ? buttons[0].value : 0,
-          squeeze: buttons[1] ? buttons[1].value : 0,
           buttons: buttons.map((button) => button.pressed),
           axes: Array.from(source.gamepad.axes),
         };

@@ -5,7 +5,7 @@ WebXR needs a secure context: ``localhost`` over ``adb reverse`` (``keep_reverse
 Messages are JSON unless noted:
 
 * page to server: ``input`` each XR frame (head and tracked controllers, poses ``[x, y, z, w, x, y,
-  z]`` in ``local-floor`` space, trigger, squeeze, buttons, axes), ``command`` (one of ``COMMANDS``),
+  z]`` in ``local-floor`` space, trigger, buttons, axes), ``command`` (one of ``COMMANDS``),
   ``layout`` (mode and bricks for the trays to come) and ``nudge`` (a step of the scene).
 * server to page: ``scene`` once (``stage``), ``frame`` at ``RATE`` (moving geom poses as float32
   ``[x, y, z, w, x, y, z]``, the anchor, the status, the head and controllers in the room frame),
@@ -35,7 +35,6 @@ from websockets.http11 import Request, Response
 from websockets.sync.server import ServerConnection, serve
 
 from specialist_sim.arrays import Float64Array, UInt8Array
-from specialist_sim.gripper import SLOTS
 
 __all__ = [
   "HANDS",
@@ -73,7 +72,6 @@ class Controller:
   pose: Float64Array
   """``(7,)`` in headset space."""
   trigger: float
-  squeeze: float
   stick: tuple[float, float] = (0.0, 0.0)
   """The thumbstick, ``(x, y)`` as a gamepad reads it: x positive right, y negative pushed forward."""
 
@@ -199,13 +197,6 @@ class Page:
       out[at, :3], out[at, 3:] = data.geom_xpos[geom], quaternion
     return out
 
-  def _hand(self, geom: int) -> int:
-    """Which hand a geom belongs to, ``-1`` for none."""
-    body = self.model.body(self.model.geom_bodyid[geom]).name
-    return next(
-      (index for index, slot in enumerate(SLOTS) if body.startswith(f"{slot}_")), -1
-    )
-
   def stage(
     self,
     data: mujoco.MjData,
@@ -223,7 +214,7 @@ class Page:
     one in use, ``{"mode", "bricks"}``."""
     model, geoms = self.model, []
     for geom in self.drawn:
-      drawn = {"color": self._color(geom).tolist(), "hand": self._hand(geom)}
+      drawn: dict[str, Any] = {"color": self._color(geom).tolist()}
       if model.geom_type[geom] == mujoco.mjtGeom.mjGEOM_MESH:
         mesh = model.geom_dataid[geom]
         at, count = model.mesh_vertadr[mesh], model.mesh_vertnum[mesh]
@@ -357,7 +348,6 @@ class Page:
         hands[hand] = Controller(
           _pose(state["pose"]),
           float(state.get("trigger", 0.0)),
-          float(state.get("squeeze", 0.0)),
           (stick[0], stick[1]),
         )
       inputs = Inputs(_pose(message["head"]), hands, time.perf_counter())

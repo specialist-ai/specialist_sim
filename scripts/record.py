@@ -7,17 +7,16 @@ demonstrations in simulation, and ``scripts/record_scripted.py`` is the fallback
 Open http://localhost:8012 on this machine for the console. Open the same
 address in the headset's browser and press Enter VR or Enter AR. With the
 headset on USB, the run keeps the adb reverse in place. Over Wi-Fi, serve with
-``--cert`` and ``--key``.
+``--cert`` and ``--key``. Each gripper rides its controller, held by its handle.
 
-    grip, squeezed    bind the gripper on that side, squeeze again to release it
-    trigger           close the jaws of a bound gripper
+    trigger           close the jaws
     A  (console R)    paused: record. Recording: keep the episode, lay a new tray, record it
     B  (console D)    drop the episode, lay a new tray, and pause
     X  (console C)    stand the scene in front of you again
     left stick        slide the scene (console: arrow keys)
     right stick       raise the scene (up, down), turn it (left, right) (console: PgUp, PgDn, Q, E)
 
-A new tray keeps the grippers where they stand and keeps their bindings, and a
+A new tray keeps the grippers where they stand, and a
 layout that would put a brick in a gripper is passed over. ``--lenses`` shows
 both wrist lenses live (GPU). Every 150 Hz row of an episode is recorded.
 """
@@ -38,8 +37,7 @@ from specialist_sim.rig import Clock
 from specialist_sim.sort_lego import Cfg, SortLegoEnv, scene
 from specialist_sim.sort_lego.env import LENS
 from specialist_sim.sort_lego.initial import MODES
-from specialist_sim.teleop import server
-from specialist_sim.teleop.binding import Grab
+from specialist_sim.teleop import mount, server
 from specialist_sim.teleop.server import HANDS, Page
 from specialist_sim.teleop.xr import facing, nudged, steer
 
@@ -118,15 +116,14 @@ def main() -> None:
   server.keep_reversed(args.port)
 
   anchor, centered = facing(STANDING, PIVOT, floor), False
-  grabs = {hand: Grab() for hand in HANDS}
   target = observation.state[0, -1].copy()
   recorder = episode.Recorder()
   kept = len(episode.listing(args.out))
   note = "A to record"
 
   def new_tray() -> None:
-    """New bricks under the hands as they stand: their poses, their bindings and
-    what they were sent all carry over."""
+    """New bricks under the hands as they stand: their poses and what they were
+    sent carry over."""
     nonlocal seed
     env.reset([seed + 1], hands=env.rig.state_rows[0, -1])
     layout = env.layouts[0]
@@ -194,12 +191,10 @@ def main() -> None:
 
     room = {} if inputs is None else {"head": anchor.to_room(inputs.head)}
     for index, hand in enumerate(HANDS):
-      held = None if inputs is None else inputs.hands.get(hand)
-      pose = None if held is None else anchor.to_room(held.pose)
-      if pose is not None:
-        room[hand] = pose
-      squeeze, trigger = (0.0, 0.0) if held is None else (held.squeeze, held.trigger)
-      target[index] = grabs[hand].update(pose, squeeze, trigger, target[index])
+      if inputs is None or hand not in inputs.hands:
+        continue  # an untracked controller's gripper stands where it was sent
+      room[hand] = anchor.to_room(inputs.hands[hand].pose)
+      target[index] = mount.target(room[hand], inputs.hands[hand].trigger)
     observation, _ = env.step(target[None, None])
     recorder.extend(*env.rig.rows(0))
     standing = observation.state[0, -1]
@@ -221,10 +216,7 @@ def main() -> None:
         if inputs is None
         else f"tracking {', '.join(tracked) or 'no controller'}",
         "hands": {
-          hand: {
-            "held": grabs[hand].hold is not None,
-            "opening": float(standing[index, 7]),
-          }
+          hand: {"opening": float(standing[index, 7])}
           for index, hand in enumerate(HANDS)
         },
       }

@@ -1,4 +1,4 @@
-"""Teleoperation: the headset's frames, the controller's binding, the page's
+"""Teleoperation: the headset's frames, the gripper's mount, the page's
 socket, and a recorded episode driven by a controller."""
 
 import json
@@ -15,7 +15,7 @@ from specialist_sim import episode, rotation
 from specialist_sim.rig import Clock
 from specialist_sim.sort_lego import Cfg, SortLegoEnv, scene
 from specialist_sim.sort_lego.initial import MODES
-from specialist_sim.teleop import binding, server, xr
+from specialist_sim.teleop import mount, server, xr
 
 FOCUS = np.array([*scene.TRAY_CENTER, scene.DESK_TOP])
 FLOOR = scene.DESK_TOP - 0.75
@@ -56,28 +56,34 @@ def test_facing_stands_the_focus_ahead_and_the_floor_on_the_real_one() -> None:
   assert np.allclose(anchor.rotation @ np.array([-1.0, 0.0, 0.0]), ahead, atol=1e-9)
 
 
-def test_a_squeeze_binds_without_a_jump_and_the_next_releases() -> None:
-  rng = np.random.default_rng(1)
-  grab = binding.Grab()
-  controller, target = _pose(rng), np.concatenate([_pose(rng), [0.2]])
-  assert np.array_equal(grab.update(controller, 0.0, 0.0, target), target)
-  bound = grab.update(controller, 1.0, 0.0, target)
-  assert np.allclose(bound[:7], target[:7], atol=1e-9)
-  assert bound[7] == binding.OPEN and grab.hold is not None
-  grab.update(controller, 0.5, 0.0, bound)
-  assert grab.hold is not None, "a half-held grip does not release"
+def test_a_gripper_rides_its_controller_and_the_trigger_closes_it() -> None:
+  controller = _pose(np.random.default_rng(1))
+  sent = mount.target(controller, 0.0)
+  assert np.allclose(sent[:7], xr.compose(controller, mount.MOUNT), atol=1e-9)
+  assert sent[7] == mount.OPEN
   turn = rotation.exp(np.array([0.0, 0.0, 0.5]))
   moved = np.concatenate(
     [controller[:3] + [0.1, 0.0, 0.0], rotation.multiply(turn, controller[3:])]
   )
-  carried = grab.update(moved, 0.0, 1.0, bound)
-  lever = target[:3] - controller[:3]
+  carried = mount.target(moved, 1.0)
+  lever = sent[:3] - controller[:3]
   assert np.allclose(carried[:3], moved[:3] + rotation.rotate(turn, lever), atol=1e-9)
-  assert carried[7] == binding.SHUT
-  assert np.array_equal(grab.update(None, 0.0, 1.0, carried), carried)
-  assert grab.hold is not None, "an untracked controller keeps its binding"
-  released = grab.update(moved, 1.0, 0.0, carried)
-  assert np.array_equal(released, carried) and grab.hold is None
+  assert carried[7] == mount.SHUT
+
+
+def test_the_mount_holds_the_gripper_by_its_handle() -> None:
+  """A controller held upright in a right hand, pointing ahead along -z, in
+  WebXR's own axes: the back of the hand toward +x, the arm toward +y."""
+  upright = rotation.exp(
+    np.array([np.pi / 2, 0.0, 0.0])
+  )  # the rod's -Z turned to +y, up
+  controller = np.array([0.3, 1.0, -0.4, *upright])
+  tag = mount.target(controller, 0.0)
+  assert np.allclose(tag[:3], [0.3, 1.0 + mount.HANDLE, -0.4]), "above the fist"
+  axes = [rotation.rotate(tag[3:7], axis) for axis in np.eye(3)]
+  assert np.allclose(axes, [[0, 0, -1], [-1, 0, 0], [0, 1, 0]], atol=1e-12), (
+    "forward ahead, left to the left, up the handle"
+  )
 
 
 def test_the_sticks_move_the_scene_the_way_the_operator_faces() -> None:
@@ -152,9 +158,8 @@ def test_the_console_and_the_headset_round_trip() -> None:
     assert staged["type"] == "scene" and len(staged["geoms"]) == len(console.drawn) > 0
     assert staged["modes"] == list(MODES) and staged["floor"] == -1.14
     assert sum(geom.get("texture") is not None for geom in staged["geoms"]) == 2
-    assert {geom["hand"] for geom in staged["geoms"]} == {-1, 0, 1}
     for buttons in ([False] * 6, [False, True, False, False, True, False]):
-      hand = {"pose": [0.1, 1.0, -0.3, 1, 0, 0, 0], "trigger": 0.25, "squeeze": 1.0}
+      hand = {"pose": [0.1, 1.0, -0.3, 1, 0, 0, 0], "trigger": 0.25}
       hand |= {"buttons": buttons, "axes": [0.0, 0.0, 0.5, -0.75]}
       browser.send(
         json.dumps(
@@ -184,19 +189,20 @@ def test_the_console_and_the_headset_round_trip() -> None:
     )
 
 
-def test_a_bound_controller_carries_a_hand_and_every_row_is_recorded() -> None:
+def test_a_mounted_controller_carries_a_hand_and_every_row_is_recorded() -> None:
   clock = Clock(physics_dt=1.0 / 1500.0, per_row=10, per_action=1, per_step=1)
   env = SortLegoEnv(Cfg(clock=clock, render=False, bricks=1))
   observation, _ = env.reset([3])
   target = observation.state[0, -1].copy()
-  grab = binding.Grab()
-  controller = np.array([-0.2, 0.2, -0.1, 1.0, 0.0, 0.0, 0.0])
+  # Where the hand stands mounted, so the first tick moves it nowhere.
+  home = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+  controller = xr.compose(target[1, :7], xr.relative(mount.MOUNT, home))
   recorder = episode.Recorder()
   recorder.start("quest", {"source": "quest", **env.describe(0)})
   recorder.extend(*(rows[-1:] for rows in env.rig.rows(0)))
-  for tick in range(150):
+  for _ in range(150):
     controller[0] -= 0.0003
-    target[1] = grab.update(controller, 1.0 if tick == 0 else 0.0, 0.0, target[1])
+    target[1] = mount.target(controller, 0.0)
     observation, _ = env.step(target[None, None])
     recorder.extend(*env.rig.rows(0))
   recorded = recorder.finish()

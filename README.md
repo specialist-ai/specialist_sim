@@ -232,27 +232,27 @@ uv run --extra teleop python scripts/record.py --out data/episodes/NAME --desk-h
 2. Open `http://localhost:8012` on this machine. The tab is the console.
 3. Open the same address in the headset's browser.
 4. Press **Enter VR** (a room around you) or **Enter AR** (passthrough). The
-   scene stands in front of you, the desk top `--desk-height` over the floor.
+   scene stands in front of you, the desk top `--desk-height` over the floor,
+   and each gripper rides its controller, held by its handle.
 
 Over Wi-Fi, serve with `--cert` and `--key` and open `https://<host>:8012` in
 the headset. Add `--lenses` to show both wrist lenses live.
 
 | Action | Quest | Console |
 | --- | --- | --- |
-| Bind or release the gripper on that side | Squeeze the grip | — |
-| Close the jaws of a bound gripper | Trigger | — |
+| Close the jaws | Trigger | — |
 | Paused: record. Recording: keep the episode, lay a new tray, record it. | A | R |
 | Drop the episode, lay a new tray, pause | B | D |
 | Recenter the scene in front of the head | X | C |
 | Slide the scene along the floor | Left stick | Arrow keys |
 | Raise or lower the scene, turn it about the tray | Right stick | PgUp, PgDn, Q, E |
 
-A new tray keeps the grippers where they stand and keeps their bindings. If a
+A new tray keeps the grippers where they stand. If a
 new layout puts a brick in a gripper, the run uses the next seed. The console
 also sets the layout of the next trays, and its *Operator's view* looks through
 the headset. `specialist_sim.teleop` is scene-agnostic: `xr` maps the headset's
-space to the room and moves the scene about a focus, `binding` binds a gripper
-to a controller, and `server` serves the page and its socket.
+space to the room and moves the scene about a focus, `mount` mounts a gripper
+on a controller, and `server` serves the page and its socket.
 
 ### The scripted policy, the fallback
 
@@ -394,7 +394,7 @@ src/specialist_sim/
   eval.py           Env, Policy, eval_policy, summary, mcnemar
   scripted.py       ScriptedPolicy, a script's stages carried out
   episode.py        a recorded episode, its recorder, and Recordings for an evaluation
-  teleop/           Quest teleoperation: xr, binding, server and page.html
+  teleop/           Quest teleoperation: xr, mount, server and page.html
   sort_lego/        the LEGO env: scene, assets, initial, task, env, script
   pickplace/        the pick-and-place env
   dataset/          corpus layers, takes and regions (dataset extra)
