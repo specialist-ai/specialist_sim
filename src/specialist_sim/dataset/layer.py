@@ -15,7 +15,7 @@ from typing import Any, cast
 import av
 import numpy as np
 import rerun as rr
-from rerun.experimental import Chunk, LazyChunkStream, OptimizationProfile, send_chunks
+from rerun.chunk import Chunk, LazyChunkStream, OptimizationProfile
 from specialist_corpus import schema
 
 from specialist_sim.arrays import Float64Array, Int64Array, UInt8Array
@@ -291,7 +291,7 @@ def write(
       stream.set_sinks(rr.FileSink(partial))
       values = cast("Any", rr.AnyValues)
       stream.send_property(schema.STATE, values(**account))
-      send_chunks(store, recording=stream)
+      rr.send_chunks(store, recording=stream)
     partial.replace(path)
   finally:
     partial.unlink(missing_ok=True)
