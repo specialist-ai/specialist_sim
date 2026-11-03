@@ -607,8 +607,8 @@ dependencies = [
 
 [[package]]
 name = "specialist-description"
-version = "0.5.0"
-source = { git = "ssh://git@github.com/specialist-ai/specialist_description.git?branch=main#100ff458372644b6ecb683e732fe6b07399abaa0" }
+version = "0.6.0"
+source = { git = "ssh://git@github.com/specialist-ai/specialist_description.git?branch=main#b0943b89217838943dadc7880255110f97fefda6" }
 
 [[package]]
 name = "specialist-sim"

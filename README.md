@@ -17,8 +17,7 @@ uv run pytest
 ```
 
 The `teleop` extra adds the Quest page's socket. The `dataset` extra adds the
-corpus layer writer and the take replay. The lock pins
-`specialist_description` at 100ff45, the last revision with `mjcf_path`.
+corpus layer writer and the take replay.
 
 ## Terms
 
@@ -180,20 +179,20 @@ MuJoCo Menagerie's grippers use. Measured on the LEGO env at 150 Hz rows:
 | Other contacts | 4 ms, impedance 0.9 / 0.95 | 2 ms, impedance 0.95 / 0.99 |
 | Object damping | 3e-4 | 3e-7 |
 | Two hands clearing a 12-brick pile | 10.2x real time | 5.5x real time |
-| Pads into a held brick | 6.1 mm | 0.6 mm |
-| Slip of a shaken brick | 3.6 mm, 10° | 0.3 mm, 0.2° |
+| Pads into a held brick | 6.7 mm | 0.7 mm |
+| Slip of a shaken brick | 3.3 mm, 1.9° | 0.3 mm, 0.7° |
 | Creep of resting bricks | 25.5 mm/s | 0.04 mm/s |
 | Spin kept over 50 ms of flight | 0% | 81% |
 
 With one setting changed from the default: `impratio` 10 raises the slip from
-0.3 mm to 2.8 mm. rlft's softer pads raise the sink from 0.6 mm to 5.1 mm. An
+0.3 mm to 2.7 mm. rlft's softer pads raise the sink from 0.7 mm to 6.1 mm. An
 object damping of 3e-4 keeps piles creeping at 7.9 mm/s a second after they
 land, because a tipping brick turns at only 0.37 rad/s, and takes all the spin
 out of a tossed brick. Euler measures like `implicitfast` here, which MuJoCo
 recommends for stability under damping. The NoSlip solver stays off: two
-iterations cut the slip to 0.05 mm but cost a fifth of the speed, and MuJoCo
+iterations cut the slip to 0.03 mm but cost a fifth of the speed, and MuJoCo
 warns about it in scenes with many contacts. A 1.33 ms step runs twice as fast
-(11x real time) and sinks the pads 0.85 mm.
+(11x real time) and sinks the pads 1.0 mm.
 
 ## Evaluation
 

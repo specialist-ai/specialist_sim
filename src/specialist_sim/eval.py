@@ -213,7 +213,7 @@ def revision(env: Env) -> str:
   """A hash of what decides an environment's answer to a seed: the gripper's
   description, the configuration, MuJoCo, and the env's assets."""
   digest = hashlib.sha256()
-  for root in (specialist_description.variant_dir(VARIANT), *env.assets):
+  for root in (specialist_description.get_variant_dir(VARIANT), *env.assets):
     for path in sorted(Path(root).rglob("*")):
       if path.is_file():
         digest.update(path.relative_to(root).as_posix().encode())

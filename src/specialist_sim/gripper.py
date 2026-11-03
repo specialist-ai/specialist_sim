@@ -73,7 +73,9 @@ def spec(side: int) -> mujoco.MjSpec:
   """The gripper as described, with this rig's finger servo. The description
   lets two grippers pass through each other, so the hand on each ``side``
   (its index in ``SLOTS``) gets a contact bit of its own that meets the other's."""
-  described = mujoco.MjSpec.from_file(str(specialist_description.mjcf_path(VARIANT)))
+  described = mujoco.MjSpec.from_file(
+    str(specialist_description.get_mjcf_path(VARIANT))
+  )
   turn = 2.0 * np.pi * FINGER_HZ
   for finger in ("left", "right"):
     servo = described.actuator(f"{finger}_finger")
