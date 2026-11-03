@@ -21,6 +21,7 @@ from specialist_sim.arrays import Float64Array
 __all__ = [
   "REACH",
   "Anchor",
+  "ahead",
   "compose",
   "facing",
   "heading",
@@ -49,6 +50,21 @@ def compose(a: Float64Array, b: Float64Array) -> Float64Array:
   """Pose ``b`` ``(7,)`` given in the frame of pose ``a``, in ``a``'s parent frame."""
   return np.concatenate(
     [a[:3] + rotation.rotate(a[3:7], b[:3]), rotation.multiply(a[3:7], b[3:7])]
+  )
+
+
+def ahead(
+  newer: Float64Array, older: Float64Array, apart: float, by: float
+) -> Float64Array:
+  """Pose ``newer`` ``(7,)`` carried ``by`` seconds on along its motion from
+  ``older``, a pose ``apart`` seconds before it, at the same speed and turn."""
+  rate = by / apart
+  turn = rotation.log(rotation.multiply(newer[3:7], rotation.conjugate(older[3:7])))
+  return np.concatenate(
+    [
+      newer[:3] + rate * (newer[:3] - older[:3]),
+      rotation.multiply(rotation.exp(rate * turn), newer[3:7]),
+    ]
   )
 
 

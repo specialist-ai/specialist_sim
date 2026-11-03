@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from specialist_sim import episode
+from specialist_sim.arrays import Float64Array
 from specialist_sim.gripper import SLOTS
 from specialist_sim.render import Renderer
 from specialist_sim.rig import Clock
@@ -38,8 +39,8 @@ from specialist_sim.sort_lego import Cfg, SortLegoEnv, scene
 from specialist_sim.sort_lego.env import LENS
 from specialist_sim.sort_lego.initial import MODES
 from specialist_sim.teleop import mount, server
-from specialist_sim.teleop.server import HANDS, Page
-from specialist_sim.teleop.xr import facing, nudged, steer
+from specialist_sim.teleop.server import HANDS, Inputs, Page
+from specialist_sim.teleop.xr import ahead, facing, nudged, steer
 
 CLOCK = Clock(physics_dt=1.0 / 1500.0, per_row=10, per_action=1, per_step=1)
 """One 150 Hz row a step, the controllers' pose its one setpoint."""
@@ -61,6 +62,31 @@ PANEL = np.array(
 of them."""
 LENS_RATE = 10.0
 LENS_SIZE = 240
+FRESH = 0.05
+"""The most two headset frames may stand apart, seconds, for the newer to be
+carried on along their motion. The headset draws at 72 Hz or more and the loop
+runs at 150: a pose held until the next frame would step the setpoint, its speed
+twice the hand's and then none."""
+
+
+def carried(
+  newest: Inputs, older: Inputs | None, hand: str, now: float
+) -> Float64Array:
+  """A controller's pose in headset space at ``now``, ``time.perf_counter()``:
+  the newest frame's, carried on along its motion since the frame before, by the
+  time since it arrived (at most a frame's)."""
+  pose = newest.hands[hand].pose
+  if (
+    older is None
+    or hand not in older.hands
+    or newest.drawn is None
+    or older.drawn is None
+  ):
+    return pose
+  apart = newest.drawn - older.drawn
+  if not 0.0 < apart <= FRESH:
+    return pose
+  return ahead(pose, older.hands[hand].pose, apart, min(now - newest.at, apart))
 
 
 def main() -> None:
@@ -116,6 +142,8 @@ def main() -> None:
   server.keep_reversed(args.port)
 
   anchor, centered = facing(STANDING, PIVOT, floor), False
+  newest: Inputs | None = None
+  older: Inputs | None = None
   target = observation.state[0, -1].copy()
   recorder = episode.Recorder()
   kept = len(episode.listing(args.out))
@@ -141,6 +169,8 @@ def main() -> None:
   due = time.perf_counter()
   while True:
     inputs = console.latest()
+    if inputs is not None and (newest is None or inputs.at != newest.at):
+      older, newest = newest, inputs
     if inputs is not None and not centered:
       anchor, centered = facing(inputs.head, PIVOT, floor), True
     for asked in console.layouts():
@@ -190,10 +220,11 @@ def main() -> None:
       )
 
     room = {} if inputs is None else {"head": anchor.to_room(inputs.head)}
+    now = time.perf_counter()
     for index, hand in enumerate(HANDS):
       if inputs is None or hand not in inputs.hands:
         continue  # an untracked controller's gripper stands where it was sent
-      room[hand] = anchor.to_room(inputs.hands[hand].pose)
+      room[hand] = anchor.to_room(carried(inputs, older, hand, now))
       target[index] = mount.target(room[hand], inputs.hands[hand].trigger)
     observation, _ = env.step(target[None, None])
     recorder.extend(*env.rig.rows(0))

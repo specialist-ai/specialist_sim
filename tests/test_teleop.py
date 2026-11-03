@@ -71,6 +71,16 @@ def test_a_gripper_rides_its_controller_and_the_trigger_closes_it() -> None:
   assert carried[7] == mount.SHUT
 
 
+def test_a_pose_carried_ahead_keeps_its_speed_and_turn() -> None:
+  turn = rotation.exp(np.array([0.0, 0.2, 0.0]))
+  older = np.array([0.1, 1.0, -0.3, 1.0, 0.0, 0.0, 0.0])
+  newer = np.concatenate([older[:3] + [0.02, 0.0, 0.0], turn])
+  carried = xr.ahead(newer, older, 0.014, 0.007)
+  assert np.allclose(carried[:3], older[:3] + [0.03, 0.0, 0.0])
+  assert np.allclose(carried[3:], rotation.exp(np.array([0.0, 0.3, 0.0])))
+  assert np.allclose(xr.ahead(newer, older, 0.014, 0.0), newer)
+
+
 def test_the_mount_holds_the_gripper_by_its_handle() -> None:
   """A controller held upright in a right hand, pointing ahead along -z, in
   WebXR's own axes: the back of the hand toward +x, the arm toward +y."""
@@ -163,7 +173,12 @@ def test_the_console_and_the_headset_round_trip() -> None:
       hand |= {"buttons": buttons, "axes": [0.0, 0.0, 0.5, -0.75]}
       browser.send(
         json.dumps(
-          {"type": "input", "head": [0, 1.6, 0, 1, 0, 0, 0], "hands": {"right": hand}}
+          {
+            "type": "input",
+            "t": 1234.5,
+            "head": [0, 1.6, 0, 1, 0, 0, 0],
+            "hands": {"right": hand},
+          }
         )
       )
     browser.send(json.dumps({"type": "command", "name": "drop"}))
@@ -172,6 +187,7 @@ def test_the_console_and_the_headset_round_trip() -> None:
     assert _gather(console.layouts, 1) == [{"mode": "pile", "bricks": 4}]
     latest = console.latest()
     assert latest is not None and latest.hands["right"].stick == (0.5, -0.75)
+    assert latest.drawn == 1.2345, "the headset's frame time, in seconds"
     browser.send(json.dumps({"type": "nudge", "forward": 0.01, "turn": 0.02}))
     assert _gather(console.nudges, 1) == [server.Nudge(forward=0.01, turn=0.02)]
     console.publish(

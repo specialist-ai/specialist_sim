@@ -4,9 +4,10 @@ tab, the scene in AR or VR in the Quest's browser (``page.html``).
 WebXR needs a secure context: ``localhost`` over ``adb reverse`` (``keep_reversed``) or a certificate.
 Messages are JSON unless noted:
 
-* page to server: ``input`` each XR frame (head and tracked controllers, poses ``[x, y, z, w, x, y,
-  z]`` in ``local-floor`` space, trigger, buttons, axes), ``command`` (one of ``COMMANDS``),
-  ``layout`` (mode and bricks for the trays to come) and ``nudge`` (a step of the scene).
+* page to server: ``input`` each XR frame (its time ``t`` in ms, head and tracked controllers,
+  poses ``[x, y, z, w, x, y, z]`` in ``local-floor`` space, trigger, buttons, axes), ``command``
+  (one of ``COMMANDS``), ``layout`` (mode and bricks for the trays to come) and ``nudge`` (a step
+  of the scene).
 * server to page: ``scene`` once (``stage``), ``frame`` at ``RATE`` (moving geom poses as float32
   ``[x, y, z, w, x, y, z]``, the anchor, the status, the head and controllers in the room frame),
   ``pulse``, and binary lens pictures: one byte of name length, the name, then a JPEG.
@@ -95,6 +96,10 @@ class Inputs:
   """The controllers tracked, by hand."""
   at: float
   """When the headset sent it, ``time.perf_counter()``."""
+  drawn: float | None = None
+  """When the headset drew the frame, seconds on the headset's own clock: steadier
+  than ``at``, which carries the link's jitter. ``None`` from a page that does not
+  say."""
 
 
 def _packed(array: np.ndarray[Any, Any]) -> str:
@@ -350,7 +355,13 @@ class Page:
           float(state.get("trigger", 0.0)),
           (stick[0], stick[1]),
         )
-      inputs = Inputs(_pose(message["head"]), hands, time.perf_counter())
+      drawn = message.get("t")
+      inputs = Inputs(
+        _pose(message["head"]),
+        hands,
+        time.perf_counter(),
+        None if drawn is None else float(drawn) / 1000.0,  # the page's milliseconds
+      )
       with self._lock:
         self._inputs = inputs
 
