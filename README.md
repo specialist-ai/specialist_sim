@@ -2,7 +2,8 @@
 
 A simulated capture rig for collecting demonstrations and evaluating
 manipulation policies: grippers on their embodiment, standing in whatever scene
-an env puts them in. One env comes with it, pick-and-place.
+an env puts them in. Two tasks come with it, LEGO sorting and
+pick-and-place.
 
 ## Setup
 
@@ -21,7 +22,8 @@ lens's seat on the gripper base, and the rate it fires at. `NOMINAL` is the
 rig's own. A lens keeps the disc inscribed in its frame and is black outside
 it, as a recorded image does. `Cfg.image_size` is how many pixels across a
 frame is traced, 360 by default, which is the width a trainer crops from.
-`render.Renderer` draws any camera on any body.
+`render.Renderer` draws any camera on any body, and `Renderer.render_many`
+draws many envs' views in one batch, each exactly as that env alone draws it.
 
 ## The rig
 
@@ -37,8 +39,10 @@ observation = rig.step(hold(observation.state[:, -1]))
 ```
 
 A hand is eight numbers: its base tag's room-frame position, a rotation as a
-`wxyz` quaternion, and its left finger's angle in radians. Every array has a
-leading axis over the `num_envs` parallel envs the rig holds.
+`wxyz` quaternion, and its left finger's angle in radians. The base tag sits
+`gripper.TAG_OFFSET` (25 mm) behind the described base, where the fiducial is
+mounted on the real gripper. Every array has a leading axis over the
+`num_envs` parallel envs the rig holds.
 
 | field | shape | meaning |
 | --- | --- | --- |
@@ -58,15 +62,17 @@ in hand up to one frame period past it.
 
 The envs' data are the truth between steps: anything moved on
 `rig.datas[env_idx]` is what the next step runs from, and an env puts its own
-things there between `place` and `begin`. Each env steps its own `MjData`
-with `mj_step` on a thread pool, which MuJoCo runs without the GIL, so an env
-lands exactly where it would alone and keeps its solver's warm start from one
-physics step to the next.
+things there between `place` and `begin`. `settle` runs named envs alone, the
+hands held, so a scene's loose objects come to rest before an episode opens.
+Each env steps its own `MjData` with `mj_step` on a thread pool, which MuJoCo
+runs without the GIL, so an env lands exactly where it would alone and keeps
+its solver's warm start from one physics step to the next.
 
 After a step the rig reports `unstable`, whether MuJoCo reset an env it could
 not carry, and `tracking_error`, the largest gap between a driven hand and its
 setpoint. Every row's joint coordinates sit in `rig.qpos_rows` and
-`rig.qvel_rows`, and its hands in `rig.state_rows`.
+`rig.qvel_rows`, its hands in `rig.state_rows` and the setpoints they chased in
+`rig.setpoint_rows`. `rig.rows(env_idx)` hands one env's rows to a recorder.
 
 ### Time
 
@@ -93,8 +99,9 @@ physics lattice, from wherever in its period an episode opens it, so it slips
 against the control step and against the other lens, and its shutter falls
 between rows as a capture's does. An episode draws where each lens stands from
 the seed it is reproduced by. The observation carries each lens's newest
-exposure older than `camera_latency`, beside the row it was taken at. Only
-the exposures an observation delivers are traced.
+exposure older than `camera_latency`, beside the row it was taken at. Only the
+exposures an observation delivers are traced. With `Cfg.render` off, the rig
+traces nothing and needs no GPU.
 
 ### Choosing the embodiment
 
@@ -102,19 +109,20 @@ the exposures an observation delivers are traced.
 `left_gripper` and `right_gripper`, the scene holds. Another embodiment
 implements `specialist_sim.embodiment.Embodiment`: it stands the hands in the
 scene, binds their ids, puts a hand at a pose, and writes `ctrl` and `xfrc`
-for every env each physics step. An embodiment's `attach` stands every body of
-a hand under its slot's name. A hand's state is its base tag's pose whatever
-carries it, so a policy is not told. `tests/gantry.py` is such an
+for every env each physics step. `gripper.attach` seats a gripper on its
+embodiment at the base tag, and gives each hand a contact bit of its own, so
+the two hands collide with each other. A hand's state is its base tag's pose
+whatever carries it, so a policy is not told. `tests/gantry.py` is such an
 embodiment, a joint chain driven through `ctrl`, and the seam tests run on it
 beside the free rig.
 
 The default embodiment, `Floating`, flies each gripper on a massless free
 joint: an impedance of 4000 N/m and 40 N m/rad pulls it toward its setpoint,
 the segment's velocity fed forward and the gripper's weight cancelled. Its pull
-is capped at 25 N and 1.5 N m, so a hand stops when the fingertips meet a
-surface instead of driving through it. The cap bounds a push, not the speed: a
-hand follows its setpoint at up to 3 m/s and 20 rad/s, and closes a gap to it
-at no more than 1.5 m/s and 10 rad/s.
+is capped at 25 N and 1.5 N m, a few times the gripper's 4 N weight, so a hand
+stops when the fingertips meet the table instead of driving through it. The cap
+bounds a push, not the speed: a hand follows its setpoint at up to 3 m/s and
+20 rad/s, and closes a gap to it at no more than 1.5 m/s and 10 rad/s.
 
 ### Choosing the cameras
 
@@ -142,38 +150,77 @@ shares: a goal held for `Task.dwell` steps latches `success`, which pays one
 not carry. A label the task names in `Task.latched` is held once it is true, so
 its rate reads as "this happened", not "this was true at the end".
 
-A `Task` says what the rest is. `spec` builds the scene, `bind` reads what
-judging needs out of the compiled model, `open` lays one env's episode from its
-seed and says where each lens stands in its period, and `judge` returns a
-`Verdict`: how far every env has come, whether its goal holds, whether it is
-lost, and whatever else the task counts under its own names. `Task.name` is
-what an episode calls the scene, and `Task.focus` the room point an overview of
-it looks at. `env.task` is the task itself, so a scene's own reading is reached
-through it.
-
-A task's knobs are the task's own, `PickPlace(region=...)`, and `Cfg` carries
-only what any scene runs under. A task names the `Cfg` it expects by default,
-which `Env` uses when it is given none.
+A `Task` says the rest: `spec` builds the scene, `bind` reads the compiled
+model, `open` lays one env's episode, `rest` settles what it laid, and `judge`
+returns a `Verdict` — progress, whether the goal holds, whether it is lost, and
+whatever else the task counts under its own names. `Task.name` is what an
+episode calls the scene, and `Task.focus` the room point an overview of it
+looks at. Its knobs are its own, `PickPlace(region=...)` or
+`SortLego(mode="pile")`, while `Cfg` carries only what any scene runs under;
+`Task.lighting` is the light the scene wants, which `Cfg.lighting` overrides.
+Reach a scene's own reading through `env.task`.
 
 ## Physics
 
 Every solver and contact setting is one value, `physics.Physics`, which the rig
-applies to every scene. The values come from MuJoCo's documentation (solver
-parameters, slip, integrators) and from what MuJoCo Menagerie's grippers use:
-an `implicitfast` integrator, an elliptic friction cone at an impedance ratio
-of 100, a 2 ms contact time constant with the gripping pads taking priority,
-and object damping near zero.
+applies to every scene and every episode records. The values come from MuJoCo's
+documentation (solver parameters, slip, integrators) and from what MuJoCo
+Menagerie's grippers use: an `implicitfast` integrator, an elliptic friction
+cone at an impedance ratio of 100, a 2 ms contact time constant with the
+gripping pads taking priority, and object damping near zero.
+
+`tests/test_physics_settings.py` holds them to what they are for. A grasp
+shaken at 1.5 Hz through 5 cm keeps the brick within 1.5 mm of the hand and
+the pads 2 mm clear of its surface. A settled pile moves less than 2 mm in a
+second. A brick spun at 25 rad/s keeps over half of it through 50 ms of
+flight. Each threshold sits between what these values measure and what a wrong
+one measures.
 
 ## Evaluation
 
 `eval.eval_policy` runs one episode per seed on a `Policy` through an `Env`
 standing any task, keeping every env busy: an env whose episode ends restarts
-alone on the next seed. A task counts whatever it likes under its own names,
-in `report.labels`, and an outcome carries them. Evaluation rates each one
-without knowing what any of them mean. `eval.summary` reports the success rate
-and those rates beside everything they were produced under: the task and its
-knobs, the configuration, and a `revision` that hashes the gripper, the task,
-what it ran under, the physics engine and the files under the task's `assets`.
+alone on the next seed. A task counts whatever it likes under its own names, in
+`report.labels`, and an outcome carries them. Evaluation rates each one without
+knowing what any of them mean. `eval.summary` reports the success rate, the
+mean progress and those rates beside everything they were produced under: the
+task and its knobs, the configuration, and a `revision` that hashes the
+gripper, the task, what it ran under, the physics engine and the files under
+the task's `assets`.
+
+`eval.mcnemar` compares two evaluations of the same seeds episode by episode,
+with the exact McNemar test. Pairing removes the variance between seeds, so it
+detects a smaller difference than two success rates do. A rerun whose
+arithmetic differs only in its last bits still flips about one episode in eight
+of a LEGO evaluation, so treat a difference of under ten episodes in 150 as
+noise.
+
+## The LEGO sorting task
+
+```python
+from specialist_sim.env import Cfg, Env
+from specialist_sim.sort_lego import SortLego
+
+env = Env(SortLego(bricks=1), Cfg(driven=("right_gripper",)), num_envs=32)
+observation, report = env.reset(range(32))
+```
+
+A desk with a tray, a bin of each color, and twelve 2 x 4 bricks, six of each
+color. `SortLego.bins` picks the bins: `akrobins` (the default), a red and a
+blue AkroBin 30210, or `clear`, clear bins with a color card on each. An
+episode records which it used. A layout puts some bricks on the tray and parks
+the rest in their bins: `drop` (the task: 1 to 8 bricks dropped onto the tray,
+none starting inside another) and `pile`. A layout is a function of `(mode,
+seed, bricks)`, which each episode records. A driven hand starts over the
+tray's near corner on its side, its fingers aimed at the middle of the tray
+floor. A hand nobody drives waits aside, out of every lens.
+
+A brick is sorted in its color's bin, missorted in the other, lost off the
+desk. `report.success` is every started brick sorted, and `report.progress` the
+share sorted; `task.score(env_idx)` counts them. `SortLego.swapped` draws every
+brick and bin in the other color, a clear bin's card or an AkroBin's plastic,
+while physics and scoring keep each brick's own. A policy that sorts both
+scenes reads the bins' colors, not their sides.
 
 ## The pick-and-place task
 
@@ -211,11 +258,13 @@ env.reset([0], start=(hands, cube))   # hands (2, 8); cube (x, y, yaw)
 src/specialist_sim/
   env.py            the Env every task is stood in, and the Task interface
   rig.py            the hands on their embodiment in num_envs envs, and the Clock
-  gripper.py        the described gripper, its base, its pads
   embodiment.py     what holds the hands up: Floating
-  action.py         action chunks, and the Interpolator the embodiment chases
+  gripper.py        the described gripper, its base tag, its pads
+  physics.py        every solver and contact setting
   camera.py         the MEI fisheye, which render.py and kernels.py trace on the GPU
+  action.py         action chunks, and the Interpolator the embodiment chases
   eval.py           Policy, eval_policy, summary, mcnemar
+  sort_lego/        the LEGO sorting task: scene, assets, initial, task
   pickplace/        the pick-and-place task: room, task
 tests/
 ```

@@ -114,6 +114,12 @@ class Task(ABC):
     """Lay one env's episode from its seed, or where ``start`` says, and say
     where each lens stands in its period, ``(lenses,)`` in ``[0, 1)``."""
 
+  @property
+  def rest(self) -> float:
+    """Seconds the scene runs before an episode opens, so what was laid
+    settles."""
+    return 0.0
+
   @abstractmethod
   def judge(self) -> Verdict:
     """Where every env stands now. A reset judges every env, including ones
@@ -154,6 +160,8 @@ class Env[T: Task]:
         for env_idx, seed in zip(chosen, seeds, strict=True)
       ]
     )
+    if self.task.rest:
+      self.rig.settle(chosen, self.task.rest)
     observation = self.rig.begin(chosen, phases)
     self._held[chosen] = 0
     self._success[chosen] = False
