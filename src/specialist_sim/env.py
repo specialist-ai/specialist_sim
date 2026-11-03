@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import mujoco
 import numpy as np
@@ -21,7 +21,9 @@ from specialist_sim.gripper import SLOTS
 from specialist_sim.physics import Physics
 from specialist_sim.rig import Clock, Lighting, Observation, Rig
 
-__all__ = ["Cfg", "Env", "Report", "Task", "Verdict"]
+__all__ = ["Cfg", "Env", "Report", "Task", "Verdict", "env_from"]
+
+_SCENES: dict[str, type["Task"]] = {}
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,7 @@ class Task(ABC):
     super().__init_subclass__(**named)
     if not getattr(cls, "name", ""):
       raise TypeError(f"{cls.__name__} must name its scene")
+    _SCENES[cls.name] = cls
 
   @abstractmethod
   def spec(self) -> mujoco.MjSpec:
@@ -145,6 +148,15 @@ class Env[T: Task]:
     """Each latched label, held once it has been true."""
     task.bind(self.rig)
 
+  def describe(self) -> dict[str, Any]:
+    """What an episode of this env was, as the scene it stood and the numbers
+    that built it. ``env_from`` stands the same env again from it."""
+    return {
+      "scene": self.task.name,
+      "task": asdict(cast(Any, self.task)),
+      "clock": asdict(self.cfg.clock),
+    }
+
   def reset(
     self,
     seeds: Sequence[int],
@@ -192,3 +204,14 @@ class Env[T: Task]:
       reward=reward,
       done=self._success | verdict.failed | self.rig.unstable,
     )
+
+
+def env_from(meta: dict[str, Any], **named: Any) -> "Env[Task]":
+  """The env an episode was recorded in, stood again from its ``meta``."""
+  task = _SCENES[meta["scene"]](**_tupled(meta["task"]))
+  return Env(task, Cfg(clock=Clock(**meta["clock"]), **named))
+
+
+def _tupled(knobs: dict[str, Any]) -> dict[str, Any]:
+  """JSON gives back a list where a dataclass wants a tuple."""
+  return {k: tuple(v) if isinstance(v, list) else v for k, v in knobs.items()}

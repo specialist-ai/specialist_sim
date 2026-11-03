@@ -2,9 +2,9 @@
 
 A simulated capture rig for collecting demonstrations and evaluating
 manipulation policies: grippers on their embodiment, standing in whatever scene
-an env puts them in. Two tasks come with it, LEGO sorting and
-pick-and-place. A recorded session replays through it, drawn over the
-footage it came from.
+a task gives them. One `Env` stands every task; two tasks come with it, LEGO
+sorting and pick-and-place. Demonstrations are collected with handheld
+grippers, carried by a Quest's controllers.
 
 ## Setup
 
@@ -16,7 +16,8 @@ uv sync --all-extras
 uv run pytest
 ```
 
-The `dataset` extra adds the take replay.
+The `handheld` extra adds the Quest page's socket. The `dataset` extra adds
+the take replay.
 
 ## The lenses
 
@@ -166,11 +167,11 @@ Reach a scene's own reading through `env.task`.
 ## Physics
 
 Every solver and contact setting is one value, `physics.Physics`, which the rig
-applies to every scene and every episode records. The values come from MuJoCo's
-documentation (solver parameters, slip, integrators) and from what MuJoCo
-Menagerie's grippers use: an `implicitfast` integrator, an elliptic friction
-cone at an impedance ratio of 100, a 2 ms contact time constant with the
-gripping pads taking priority, and object damping near zero.
+applies to every scene. The values come from MuJoCo's documentation (solver
+parameters, slip, integrators) and from what MuJoCo Menagerie's grippers use:
+an `implicitfast` integrator, an elliptic friction cone at an impedance ratio
+of 100, a 2 ms contact time constant with the gripping pads taking priority,
+and object damping near zero.
 
 `tests/test_physics_settings.py` holds them to what they are for. A grasp
 shaken at 1.5 Hz through 5 cm keeps the brick within 1.5 mm of the hand and
@@ -197,6 +198,57 @@ detects a smaller difference than two success rates do. A rerun whose
 arithmetic differs only in its last bits still flips about one episode in eight
 of a LEGO evaluation, so treat a difference of under ten episodes in 150 as
 noise.
+
+## Recording demonstrations
+
+### The handheld grippers, the first choice
+
+```bash
+uv run --extra handheld python scripts/record.py --out ~/recordings/NAME
+```
+
+1. Connect the headset over USB. The run sets `adb reverse tcp:8012 tcp:8012`
+   and sets it again after a reconnect.
+2. Open `http://localhost:8012` on this machine. The tab is the console.
+3. Open the same address in the headset's browser.
+4. Press **Enter VR** (a room around you) or **Enter AR** (passthrough). The
+   scene stands in front of you, the desk top `desk.HEIGHT` over the floor,
+   and each gripper rides its controller, held by its handle.
+
+Over Wi-Fi, serve with `--cert` and `--key` and open `https://<host>:8012` in
+the headset.
+
+| Action | Quest | Console |
+| --- | --- | --- |
+| Close the jaws | Trigger | — |
+| Paused: record. Recording: keep the episode, lay a new tray, record it. | A | R |
+| Drop the episode, lay a new tray, pause | B | D |
+| Recenter the scene in front of the head | X | C |
+| Slide the scene along the floor | Left stick | Arrow keys |
+| Raise or lower the scene, turn it about the tray | Right stick | PgUp, PgDn, Q, E |
+
+A new tray keeps the grippers where they stand. If a new layout puts a brick
+in a gripper, the run uses the next seed. The console also sets the layout of
+the next trays, and its *Demonstrator's view* looks through the headset.
+`specialist_sim.handheld` is scene-agnostic: `xr` maps the headset's space to
+the room and moves the scene about a focus, `mount` mounts a gripper on a
+controller, and `server` serves the page and its socket.
+
+### Episodes
+
+`<folder>/<name>.npz` (`episode.py`) holds, per row: `timestamp`, the hands as
+they stood (`state`) and the setpoints they chased (`commanded`), both
+`(rows, 2, 8)` in `SLOTS` order, `qpos`, `qvel`, and a JSON `meta` with the
+source, the scene, the knobs it was stood with and the clock it ran on, and
+the final score. `env.env_from` stands the same env again from that `meta`,
+which is how a recording is filmed. No image is stored, so a change to a lens
+needs no new recording.
+
+```bash
+MUJOCO_GL=egl uv run python scripts/render_video.py ~/recordings/NAME/EPISODE.npz --out video.mp4
+```
+
+films an episode: an overview of its scene beside each hand's wrist lens.
 
 ## The LEGO sorting task
 
@@ -278,9 +330,11 @@ src/specialist_sim/
   camera.py         the MEI fisheye, which render.py and kernels.py trace on the GPU
   action.py         action chunks, and the Interpolator the embodiment chases
   eval.py           Policy, eval_policy, summary, mcnemar
+  episode.py        a recorded episode and its recorder
+  handheld/         the grippers on a Quest's controllers: xr, mount, server, page.html
   sort_lego/        the LEGO sorting task: scene, assets, initial, task
   pickplace/        the pick-and-place task: room, task
   take.py           Take, a recorded session read back to drive the rig (dataset extra)
-scripts/            replay
+scripts/            record, render_video, replay
 tests/
 ```

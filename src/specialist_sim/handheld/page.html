@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sim data collection</title>
+<style>
+  :root { --bg: #202124; --panel: #2b2c30; --line: #3c3d42; --text: #e8eaed; --dim: #9aa0a6; --rec: #d93025; --left: #4c8bf5; --right: #e8710a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px system-ui, sans-serif; }
+  body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
+  #view { position: relative; min-width: 0; overflow: hidden; }
+  #view canvas { display: block; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  h1 { font-size: 15px; margin: 0; color: var(--dim); font-weight: 600; }
+  #state { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #state.recording { color: var(--rec); }
+  #detail, .dim { color: var(--dim); }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  button, select, input { font: inherit; color: var(--text); background: #35363a; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+  button { cursor: pointer; }
+  button:hover { background: #404146; }
+  button#record.recording { background: var(--rec); border-color: var(--rec); }
+  kbd { color: var(--dim); font-size: 12px; margin-left: 4px; }
+  section { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row > select { flex: 1; }
+  .row > input { width: 64px; }
+  .hand { display: flex; justify-content: space-between; }
+  .hand b.left { color: var(--left); } .hand b.right { color: var(--right); }
+  #xr button { font-size: 16px; font-weight: 600; padding: 12px; background: #1a73e8; border-color: #1a73e8; }
+  #xr button:disabled { background: #35363a; border-color: var(--line); color: var(--dim); cursor: default; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<aside>
+  <h1>Sim data collection</h1>
+  <div id="xr" class="buttons"><button id="enter-vr" disabled>Enter VR</button><button id="enter-ar" disabled>Enter AR</button></div>
+  <div id="xr-note" class="dim"></div>
+  <div id="state">Connecting…</div>
+  <div id="detail"></div>
+  <div class="buttons">
+    <button id="record" data-command="record">Record<kbd>R</kbd></button>
+    <button data-command="drop">Drop &amp; reset<kbd>D</kbd></button>
+    <button data-command="recenter">Recenter<kbd>C</kbd></button>
+  </div>
+  <section>
+    <span class="dim">Next trays</span>
+    <div class="row"><select id="mode"></select></div>
+  </section>
+  <section>
+    <div id="headset" class="dim">Headset: not connected</div>
+    <label class="dim"><input id="follow" type="checkbox" disabled> Demonstrator's view: look through the headset</label>
+    <div id="hands"></div>
+  </section>
+  <section class="dim">
+    <span>In the headset: each gripper rides its controller; the trigger closes it ·
+      A records, and while recording keeps the episode and records the next · B drops it and pauses on a
+      new tray · X recenters · left stick slides the scene · right stick raises it (up, down) and turns it
+      (left, right)</span>
+    <span>Here: arrows slide the scene, PgUp / PgDn raise it, Q / E turn it, a centimeter or a degree a
+      press, five with Shift</span>
+  </section>
+</aside>
+<script type="module">
+// The sim in the room frame (z up), as the server sends it. On a desktop it is drawn as it is,
+// around an orbiting camera; in an immersive session one group carries it into the headset's
+// local-floor space (y up) through the server's anchor, so a geom stands exactly where MuJoCo has it.
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+
+const $ = (id) => document.getElementById(id);
+window.addEventListener("error", (event) => { $("detail").textContent = `Page error: ${event.message}`; });
+
+const view = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local-floor");
+view.appendChild(renderer.domElement);
+
+// Entering a session is a plain requestSession on the button's press. three.js's own buttons also
+// "offer" a session to the Quest's browser, and with two of them the second offer cancels the first.
+const entries = { "immersive-vr": $("enter-vr"), "immersive-ar": $("enter-ar") };
+const entryLabels = { "immersive-vr": "Enter VR", "immersive-ar": "Enter AR" };
+let entered = null;
+for (const [mode, button] of Object.entries(entries)) {
+  button.addEventListener("click", async () => {
+    if (renderer.xr.isPresenting) { await renderer.xr.getSession().end(); return; }
+    try {
+      const session = await navigator.xr.requestSession(mode, { requiredFeatures: ["local-floor"] });
+      entered = mode;
+      await renderer.xr.setSession(session);
+    } catch (error) {
+      $("xr-note").textContent = `Could not enter: ${error.message}`;
+    }
+  });
+}
+(async () => {
+  if (!navigator.xr) {
+    $("xr-note").textContent = window.isSecureContext
+      ? "This browser has no WebXR: open the page in the Quest's browser."
+      : "WebXR needs https or localhost: connect the Quest over USB (adb reverse) or serve with --cert.";
+    return;
+  }
+  const found = [];
+  for (const [mode, button] of Object.entries(entries)) {
+    button.disabled = !(await navigator.xr.isSessionSupported(mode).catch(() => false));
+    if (!button.disabled) found.push(mode.slice(10).toUpperCase());
+  }
+  $("xr-note").textContent = found.length ? "" : "No headset here: open this page in the Quest's browser.";
+})();
+
+const scene = new THREE.Scene();
+const sky = new THREE.Color(0x202124);
+scene.background = sky;
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+const room = new THREE.Group();  // the room frame, placed by the anchor in an immersive session
+room.matrixAutoUpdate = false;
+scene.add(room);
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 30);
+camera.up.set(0, 0, 1);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+
+// Lights ride the room frame with everything else, so they fall the same way on a desktop and in
+// the headset: a key, and a fill from the demonstrator.
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+const fill = new THREE.DirectionalLight(0xffffff, 0.8);
+room.add(key, key.target, fill, fill.target);
+
+// The room around the setup, drawn only in VR and on the desktop: passthrough shows the real one.
+const shell = new THREE.Group();
+room.add(shell);
+
+let meshes = [], moving = [], hands = [], anchor = new THREE.Matrix4();
+const xrSession = () => renderer.xr.getSession();
+const immersive = () => renderer.xr.isPresenting;
+
+function unpacked(text, type) {
+  const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  return new type(bytes.buffer);
+}
+
+function place(object, pose, at) {
+  object.position.set(pose[at], pose[at + 1], pose[at + 2]);
+  object.quaternion.set(pose[at + 4], pose[at + 5], pose[at + 6], pose[at + 3]);  // wxyz to xyzw
+}
+
+// A mesh shaded by its creases: each corner takes the faces round its vertex that meet its own face
+// at under CREASE. Averaging every face round a vertex, as computeVertexNormals does, smears a CAD
+// part's sharp edges across its flat walls in long bands. three.js's toCreasedNormals welds corners
+// on a 1 cm grid, too coarse for meshes in meters.
+const CREASE = Math.cos(THREE.MathUtils.degToRad(40));
+function creased(vertices, faces) {
+  const count = faces.length / 3;
+  const area = new Float32Array(3 * count), unit = new Float32Array(3 * count);
+  const around = Array.from({ length: vertices.length / 3 }, () => []);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let face = 0; face < count; face++) {
+    a.fromArray(vertices, 3 * faces[3 * face]);
+    b.fromArray(vertices, 3 * faces[3 * face + 1]);
+    c.fromArray(vertices, 3 * faces[3 * face + 2]);
+    c.sub(b).cross(a.sub(b));  // as computeVertexNormals: (c - b) x (a - b), its length twice the area
+    c.toArray(area, 3 * face);
+    c.normalize().toArray(unit, 3 * face);
+    for (let corner = 0; corner < 3; corner++) around[faces[3 * face + corner]].push(face);
+  }
+  const position = new Float32Array(9 * count), normal = new Float32Array(9 * count);
+  for (let face = 0; face < count; face++) {
+    for (let corner = 0; corner < 3; corner++) {
+      const vertex = faces[3 * face + corner], at = 9 * face + 3 * corner;
+      position.set(vertices.subarray(3 * vertex, 3 * vertex + 3), at);
+      a.set(0, 0, 0);
+      for (const other of around[vertex]) {
+        const dot = unit[3 * face] * unit[3 * other] + unit[3 * face + 1] * unit[3 * other + 1]
+          + unit[3 * face + 2] * unit[3 * other + 2];
+        if (dot >= CREASE) a.add(b.fromArray(area, 3 * other));
+      }
+      a.normalize().toArray(normal, at);
+    }
+  }
+  const shape = new THREE.BufferGeometry();
+  shape.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  shape.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+  return shape;
+}
+
+function textured(texture) {
+  // Rows arrive top first; a DataTexture reads its first row as the bottom.
+  const { width, height } = texture, rgba = unpacked(texture.rgba, Uint8Array), flipped = new Uint8Array(rgba.length);
+  for (let row = 0; row < height; row++) flipped.set(rgba.subarray(row * width * 4, (row + 1) * width * 4), (height - 1 - row) * width * 4);
+  const map = new THREE.DataTexture(flipped, width, height, THREE.RGBAFormat);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.needsUpdate = true;
+  return map;
+}
+
+function buildShell(focus) {
+  shell.clear();
+  const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x8a8178, roughness: 0.9 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), floorMaterial);
+  ground.position.set(focus[0], focus[1], 0);
+  const grid = new THREE.GridHelper(6, 12, 0x6d655d, 0x6d655d);
+  grid.rotation.x = Math.PI / 2;
+  grid.position.set(focus[0], focus[1], 0.001);
+  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xd9d6cf, roughness: 1.0, side: THREE.DoubleSide });
+  const height = 2.7, half = 3;
+  for (const [dx, dy, turn] of [[-half, 0, Math.PI / 2], [half, 0, Math.PI / 2], [0, -half, 0], [0, half, 0]]) {
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(2 * half, height), wallMaterial);
+    wall.rotation.set(Math.PI / 2, 0, turn, "ZXY");  // stood up about x, then turned about the vertical
+    wall.position.set(focus[0] + dx, focus[1] + dy, height / 2);
+    shell.add(wall);
+  }
+  shell.add(ground, grid);
+}
+
+function build(message) {
+  for (const mesh of meshes) room.remove(mesh);
+  const poses = unpacked(message.poses, Float32Array);
+  meshes = message.geoms.map((geom, row) => {
+    let shape;
+    if (geom.kind === "box") {
+      shape = new THREE.BoxGeometry(2 * geom.size[0], 2 * geom.size[1], 2 * geom.size[2]);
+    } else {
+      shape = creased(unpacked(geom.vertices, Float32Array), unpacked(geom.faces, Uint32Array));
+    }
+    const [r, g, b] = geom.color;
+    const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(r, g, b), roughness: 0.75 });
+    if (geom.texture) { material.map = textured(geom.texture); material.color.set(0xffffff); }
+    const mesh = new THREE.Mesh(shape, material);
+    place(mesh, poses, 7 * row);
+    room.add(mesh);
+    return mesh;
+  });
+  moving = message.moving;
+  hands = message.hands;
+  const focus = new THREE.Vector3(...message.focus);
+  key.position.set(focus.x + 0.4, focus.y + 0.3, focus.z + 1.6);
+  key.target.position.copy(focus);
+  fill.position.set(focus.x + 1.0, focus.y + 0.8, focus.z + 0.8);
+  fill.target.position.copy(focus);
+  orbit.target.copy(focus);
+  camera.position.set(focus.x + 0.75, focus.y, focus.z + 0.55);
+  buildShell(message.focus);
+  panel.position.fromArray(message.panel);
+  $("mode").replaceChildren(...message.modes.map((mode) => new Option(mode, mode, false, mode === message.mode)));
+  $("hands").replaceChildren(...hands.map((hand) => {
+    const line = document.createElement("div");
+    line.className = "hand";
+    line.innerHTML = `<b class="${hand}">${hand}</b><span id="hand-${hand}" class="dim">–</span>`;
+    return line;
+  }));
+}
+
+// The status board, standing in the room frame behind the bins and facing the demonstrator.
+const facing = new THREE.Quaternion().setFromRotationMatrix(
+  new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)),
+);
+const board = document.createElement("canvas");
+board.width = 1024; board.height = 192;
+const panel = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.4, 0.075),
+  new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(board), transparent: true }),
+);
+panel.quaternion.copy(facing);
+room.add(panel);
+let head = null;  // the headset's last pose in the room frame, for the demonstrator's view
+let shownStatus = "";
+function show(status) {
+  const text = JSON.stringify(status);
+  if (text === shownStatus) return;
+  shownStatus = text;
+  $("state").textContent = status.headline;
+  $("state").className = status.recording ? "recording" : "";
+  $("detail").textContent = status.detail;
+  $("record").className = status.recording ? "recording" : "";
+  $("record").firstChild.textContent = status.recording ? "Keep & next" : "Record";
+  $("headset").textContent = `Headset: ${status.headset}`;
+  for (const hand of hands) {
+    const state = status.hands[hand];
+    const shown = $(`hand-${hand}`);
+    if (shown && state) shown.textContent = `jaw ${state.opening.toFixed(2)} rad`;
+  }
+  const context = board.getContext("2d");
+  context.clearRect(0, 0, board.width, board.height);
+  context.fillStyle = status.recording ? "rgba(190, 25, 20, 0.88)" : "rgba(30, 30, 30, 0.8)";
+  context.fillRect(0, 0, board.width, board.height);
+  context.fillStyle = "#ffffff";
+  context.font = "bold 64px system-ui, sans-serif";
+  context.fillText(status.headline, 28, 80);
+  context.font = "38px system-ui, sans-serif";
+  context.fillText(status.detail, 28, 150);
+  panel.material.map.needsUpdate = true;
+}
+
+// Where the demonstrator's controllers are, drawn on the desktop only: in the headset they are
+// their own hands.
+const markers = new THREE.Group();
+room.add(markers);
+const controllerMarkers = { left: new THREE.AxesHelper(0.08), right: new THREE.AxesHelper(0.08) };
+markers.add(controllerMarkers.left, controllerMarkers.right);
+markers.visible = false;
+
+const models = new XRControllerModelFactory();
+for (const index of [0, 1]) {
+  const grip = renderer.xr.getControllerGrip(index);
+  grip.add(models.createControllerModel(grip));
+  scene.add(grip);
+}
+
+let recenterNext = false;
+renderer.xr.addEventListener("sessionstart", () => {
+  recenterNext = true;  // stand the scene in front of the head as soon as the session reports it
+  for (const [mode, button] of Object.entries(entries)) {
+    button.disabled = mode !== entered;
+    button.textContent = mode === entered ? `Exit ${mode.slice(10).toUpperCase()}` : entryLabels[mode];
+  }
+  const passthrough = xrSession().environmentBlendMode !== "opaque";
+  scene.background = passthrough ? null : new THREE.Color(0xbfc8d0);
+  shell.visible = !passthrough;
+});
+renderer.xr.addEventListener("sessionend", () => {
+  entered = null;
+  for (const [mode, button] of Object.entries(entries)) { button.disabled = false; button.textContent = entryLabels[mode]; }
+  scene.background = sky;
+  shell.visible = true;
+  room.matrix.identity();
+  room.matrixWorldNeedsUpdate = true;
+});
+
+const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/`);
+const send = (message) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
+socket.onopen = () => { $("state").textContent = "Loading the scene…"; };
+socket.onclose = () => { $("state").textContent = "Disconnected"; $("detail").textContent = "Reload once the server runs."; };
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  if (message.type === "scene") {
+    build(message);
+  } else if (message.type === "frame") {
+    const poses = unpacked(message.poses, Float32Array);
+    moving.forEach((row, at) => place(meshes[row], poses, 7 * at));
+    anchor.fromArray(message.anchor);
+    if (immersive()) { room.matrix.copy(anchor); room.matrixWorldNeedsUpdate = true; }
+    head = message.head;
+    $("follow").disabled = head === null;
+    markers.visible = !immersive() && head !== null;
+    for (const hand of ["left", "right"]) {
+      const pose = message.controllers[hand];
+      controllerMarkers[hand].visible = Boolean(pose);
+      if (pose) place(controllerMarkers[hand], pose, 0);
+    }
+    show(message.status);
+  } else if (message.type === "pulse") {
+    for (const source of xrSession() ? xrSession().inputSources : []) {
+      if (source.handedness === message.hand) source.gamepad?.hapticActuators?.[0]?.pulse(0.6, 60);
+    }
+  }
+};
+
+for (const button of document.querySelectorAll("[data-command]")) {
+  button.addEventListener("click", () => send({ type: "command", name: button.dataset.command }));
+}
+$("mode").addEventListener("change", () => send({ type: "layout", mode: $("mode").value }));
+$("follow").addEventListener("change", () => {
+  orbit.enabled = !$("follow").checked;
+  if (!$("follow").checked) { camera.up.set(0, 0, 1); camera.position.set(orbit.target.x + 0.75, orbit.target.y, orbit.target.z + 0.55); }
+});
+const KEYS = { r: "record", d: "drop", c: "recenter" };
+// A step of the scene a key moves it by, in centimeters and degrees: along the floor the way the
+// demonstrator faces, to their right, up, and a turn counterclockwise seen from above.
+const NUDGES = {
+  ArrowUp: [1, 0, 0, 0], ArrowDown: [-1, 0, 0, 0], ArrowRight: [0, 1, 0, 0], ArrowLeft: [0, -1, 0, 0],
+  PageUp: [0, 0, 1, 0], PageDown: [0, 0, -1, 0], q: [0, 0, 0, 1], e: [0, 0, 0, -1],
+};
+window.addEventListener("keydown", (event) => {
+  if (event.target.closest("input, select")) return;
+  const nudge = NUDGES[event.key.length === 1 ? event.key.toLowerCase() : event.key];
+  if (nudge) {
+    const scale = event.shiftKey ? 5 : 1;
+    const [forward, right, up, turn] = nudge.map((value) => value * scale);
+    send({ type: "nudge", forward: forward / 100, right: right / 100, up: up / 100, turn: (turn * Math.PI) / 180 });
+    event.preventDefault();
+    return;
+  }
+  const name = !event.repeat && KEYS[event.key.toLowerCase()];
+  if (name) send({ type: "command", name });
+});
+
+function pose(transform) {
+  const p = transform.position, q = transform.orientation;
+  return [p.x, p.y, p.z, q.w, q.x, q.y, q.z];
+}
+
+renderer.setAnimationLoop((time, frame) => {
+  if (frame) {
+    const space = renderer.xr.getReferenceSpace();
+    const viewer = frame.getViewerPose(space);
+    if (viewer) {
+      const tracked = {};
+      for (const source of frame.session.inputSources) {
+        if (!source.gripSpace || !source.gamepad || !["left", "right"].includes(source.handedness)) continue;
+        const grip = frame.getPose(source.gripSpace, space);
+        if (!grip) continue;
+        const buttons = source.gamepad.buttons;
+        tracked[source.handedness] = {
+          pose: pose(grip.transform),
+          trigger: buttons[0] ? buttons[0].value : 0,
+          buttons: buttons.map((button) => button.pressed),
+          axes: Array.from(source.gamepad.axes),
+        };
+      }
+      send({ type: "input", t: time, head: pose(viewer.transform), hands: tracked });
+      if (recenterNext) { send({ type: "command", name: "recenter" }); recenterNext = false; }
+    }
+  } else if ($("follow").checked && head) {
+    place(camera, head, 0);  // a WebXR head and a three.js camera both look along their -z, y up
+  } else {
+    orbit.update();
+  }
+  renderer.render(scene, camera);
+});
+
+new ResizeObserver(() => {
+  const { clientWidth: width, clientHeight: height } = view;
+  if (immersive() || !width || !height) return;
+  renderer.setSize(width, height);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+}).observe(view);
+</script>
+</body>
+</html>

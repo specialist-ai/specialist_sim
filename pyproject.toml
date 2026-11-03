@@ -14,6 +14,8 @@ dependencies = [
 [project.optional-dependencies]
 # A recorded session, read back and replayed into the environment.
 dataset = ["specialist-dataset", "av>=13", "imageio-ffmpeg>=0.5"]
+# The handheld grippers on a Quest: the page's socket.
+handheld = ["websockets>=13"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]

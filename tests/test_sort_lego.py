@@ -1,12 +1,15 @@
 """The LEGO sorting scene: layouts, scoring, both kinds of bin, the swapped
 drawing, and the task."""
 
+from pathlib import Path
+
 import mujoco
 import numpy as np
 import pytest
 
+from specialist_sim import episode
 from specialist_sim.action import hold
-from specialist_sim.env import Cfg, Env
+from specialist_sim.env import Cfg, Env, env_from
 from specialist_sim.gripper import SLOTS
 from specialist_sim.sort_lego import COLORS, SortLego, assets, initial, scene, task
 from specialist_sim.sort_lego.task import Score
@@ -196,6 +199,26 @@ def test_a_brick_dropped_into_an_akrobin_comes_to_rest_sorted(x: float) -> None:
   dof = env.rig.model.joint(f"brick_{brick}_joint").dofadr[0]
   speed = float(np.linalg.norm(env.rig.datas[0].qvel[dof : dof + 6]))
   assert speed < 0.02, f"the brick was still going at {speed:.3f} after 0.8 s"
+
+
+def test_an_episode_records_every_row_and_round_trips(tmp_path: Path) -> None:
+  env = Env(SortLego(bricks=1), BLIND)
+  observation, _ = env.reset([2])
+  recorder = episode.Recorder()
+  recorder.start("one", env.describe())
+  recorder.extend(*(rows[-1:] for rows in env.rig.rows(0)))
+  for _ in range(2):
+    observation, report = env.step(hold(observation.state[:, -1]))
+    recorder.extend(*env.rig.rows(0))
+  path = episode.save(tmp_path, recorder.finish({"score": env.task.score(0).as_dict()}))
+  loaded = episode.load(path)
+  rows = 2 * env.cfg.clock.per_step + 1
+  assert loaded.timestamp == pytest.approx(np.arange(rows) * env.cfg.clock.row_dt)
+  assert loaded.state.shape == (rows, 2, 8) and loaded.commanded.shape == (rows, 2, 8)
+  assert loaded.qpos.shape == (rows, env.rig.model.nq)
+  assert loaded.meta["score"]["started"] == 1 and recorder.name is None
+  again = env_from(loaded.meta, render=False)
+  assert again.task == env.task and again.cfg.clock == env.cfg.clock
 
 
 def test_the_lens_fires_on_its_own_clock_and_sees_the_tray() -> None:
