@@ -101,6 +101,12 @@ class Report(Predicates):
   done: BoolArray
 
   @property
+  def progress(self) -> Float64Array:
+    """The task has no milestone short of success."""
+    out: Float64Array = self.success.astype(np.float64)
+    return out
+
+  @property
   def labels(self) -> dict[str, BoolArray]:
     """What evaluation counts of this env beyond the task being solved."""
     return {"dropped": self.dropped, "picked": self.picked}

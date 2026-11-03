@@ -189,14 +189,12 @@ class _Lens:
     seen = np.ones(count, np.int32)
     seen[hidden] = 0
     self.seen = wp.array(seen, dtype=wp.int32)
-    self.image = wp.zeros(size * size * 3, dtype=wp.uint8)
-    self.struck = wp.array(np.full(size * size, -1, np.int32), dtype=wp.int32)
 
 
 class Renderer:
-  """Every camera's view of one scene. ``cameras`` names each view: the body
-  it rides and the camera seated there; a camera named for a slot cannot see
-  that hand's housing."""
+  """Every camera's view of a scene, from any data of its model. ``cameras``
+  names each view: the body it rides and the camera seated there. A camera
+  named for a slot cannot see that hand's housing."""
 
   def __init__(
     self, model: mujoco.MjModel, cameras: dict[str, tuple[int, Camera]], size: int
@@ -212,8 +210,7 @@ class Renderer:
     ]
     self.meshes = wp.array([mesh.id for mesh in self._meshes], dtype=wp.uint64)
     self.geoms = np.array([part.geom for part in self.parts], np.int32)
-    self.position = wp.zeros(len(self.parts), dtype=wp.vec3)
-    self.rotation = wp.zeros(len(self.parts), dtype=wp.mat33)
+    self.size = size
     self.albedo = wp.array(
       np.stack([part.albedo for part in self.parts]), dtype=wp.vec3
     )
@@ -249,43 +246,80 @@ class Renderer:
       _light(fill, model.light_ambient),
       _background(model),
     ]
+    self._position = wp.zeros((0, len(self.parts)), dtype=wp.vec3)
+    self._rotation = wp.zeros((0, len(self.parts)), dtype=wp.mat33)
+    self._image = wp.zeros((0, size * size * 3), dtype=wp.uint8)
+    self._struck = wp.zeros((0, size * size), dtype=wp.int32)
+    """Room for the scenes and frames of the largest batch drawn so far."""
 
   def render(
     self, data: mujoco.MjData, names: Sequence[str] | None = None
   ) -> dict[str, View]:
-    self.position.assign(np.ascontiguousarray(data.geom_xpos[self.geoms], np.float32))
-    self.rotation.assign(
-      np.ascontiguousarray(data.geom_xmat[self.geoms].reshape(-1, 3, 3), np.float32)
+    """The named views, or all of them, of one data."""
+    wanted = list(self.lenses) if names is None else list(names)
+    images, bodies = self.render_many([data], wanted)
+    return {
+      name: View(image=image, body=body)
+      for name, image, body in zip(wanted, images[0], bodies[0], strict=True)
+    }
+
+  def render_many(
+    self, datas: Sequence[mujoco.MjData], names: Sequence[str]
+  ) -> tuple[UInt8Array, Int32Array]:
+    """The named views of every data at once: the images, ``(datas, names,
+    size, size, 3)``, and the body each pixel struck, ``(datas, names, size,
+    size)``, ``-1`` for none. Every data's scene goes up in one copy and every
+    frame comes down in one, each frame as one data alone draws it."""
+    scenes, frames, pixels = len(datas), len(datas) * len(names), self.size * self.size
+    if scenes > self._position.shape[0]:
+      self._position = wp.zeros((scenes, len(self.parts)), dtype=wp.vec3)
+      self._rotation = wp.zeros((scenes, len(self.parts)), dtype=wp.mat33)
+    if frames > self._image.shape[0]:
+      self._image = wp.zeros((frames, pixels * 3), dtype=wp.uint8)
+      self._struck = wp.zeros((frames, pixels), dtype=wp.int32)
+    # A lens draws only the pixels inside its disc, so every frame starts black
+    # and struck by nothing.
+    self._image.zero_()
+    self._struck.fill_(-1)
+    self._position[:scenes].assign(
+      np.stack([data.geom_xpos[self.geoms] for data in datas]).astype(np.float32)
     )
-    out = {}
-    wanted = (
-      self.lenses if names is None else {name: self.lenses[name] for name in names}
+    self._rotation[:scenes].assign(
+      np.stack([data.geom_xmat[self.geoms].reshape(-1, 3, 3) for data in datas]).astype(
+        np.float32
+      )
     )
-    for name, lens in wanted.items():
-      mount = data.xmat[lens.body].reshape(3, 3)
-      origin = data.xpos[lens.body] + mount @ lens.pos
-      wp.launch(
-        kernels.trace,
-        dim=len(lens.pixel),
-        inputs=[
-          self.meshes,
-          self.position,
-          self.rotation,
-          lens.seen,
-          wp.vec3(*origin),
-          wp.mat33(*(mount @ lens.rotation).ravel()),
-          lens.bearings,
-          lens.pixel,
-          self.albedo,
-          *self.maps,
-          self.body,
-          *self._lights,
-          lens.image,
-          lens.struck,
-        ],
-      )
-      out[name] = View(
-        image=lens.image.numpy().reshape(lens.size, lens.size, 3).copy(),
-        body=lens.struck.numpy().reshape(lens.size, lens.size).copy(),
-      )
-    return out
+    for scene, data in enumerate(datas):
+      for index, name in enumerate(names):
+        lens = self.lenses[name]
+        mount = data.xmat[lens.body].reshape(3, 3)
+        origin = data.xpos[lens.body] + mount @ lens.pos
+        frame = scene * len(names) + index
+        wp.launch(
+          kernels.trace,
+          dim=len(lens.pixel),
+          inputs=[
+            self.meshes,
+            self._position[scene],
+            self._rotation[scene],
+            lens.seen,
+            wp.vec3(*origin),
+            wp.mat33(*(mount @ lens.rotation).ravel()),
+            lens.bearings,
+            lens.pixel,
+            self.albedo,
+            *self.maps,
+            self.body,
+            *self._lights,
+            self._image[frame],
+            self._struck[frame],
+          ],
+        )
+    size = self.size
+    images: UInt8Array = (
+      self._image[:frames].numpy().reshape(scenes, len(names), size, size, 3)
+    )
+    bodies: Int32Array = (
+      self._struck[:frames].numpy().reshape(scenes, len(names), size, size)
+    )
+    return images, bodies

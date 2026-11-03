@@ -52,13 +52,13 @@ def main() -> None:
     observation, _ = env.step(
       take.action_chunk(tick, env.rig.cfg.clock.n_action_steps)[None]
     )
-    top = np.concatenate(list(observation.image[0]), axis=1)
+    top = np.concatenate(list(observation.image[0, :, -1]), axis=1)
     bottom = np.concatenate(
       [
         over(
           take.observed(hand, tick),
-          observation.image[0, hand],
-          observation.body[0, hand],
+          observation.image[0, hand, -1],
+          observation.body[0, hand, -1],
         )
         for hand in range(len(SLOTS))
       ],

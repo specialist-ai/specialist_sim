@@ -45,6 +45,7 @@ def test_the_scene_view_watches_the_table() -> None:
 def test_the_surfaces_carry_their_maps() -> None:
   env = PickPlaceEnv(Cfg(image_size=32))
   model = env.rig.model
+  assert env.rig._renderer is not None
   mapped = {
     model.geom(part.geom).name
     for part in env.rig._renderer.parts
