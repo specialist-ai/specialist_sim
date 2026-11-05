@@ -71,7 +71,7 @@ class Gantry:
     )
     """How far above its setpoint the standing slide is sent to hold the
     gripper's weight."""
-    self._servos = np.array([hand.servos for hand in hands])
+    self._servos = np.array([hand.servo for hand in hands])
     return hands
 
   def place(self, data: mujoco.MjData, hand: int, pose: Float64Array) -> None:

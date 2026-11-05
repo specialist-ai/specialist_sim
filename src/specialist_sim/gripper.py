@@ -1,5 +1,7 @@
-"""The described gripper: a base, two servoed fingers, and the pads they grip
-with. A hand's state is the pose of its base tag and its left finger's angle.
+"""The described gripper: a base, two fingers, and the pads they grip with.
+One servo turns the right finger, and the left follows it through a 1:1 gear.
+A hand's state is the pose of its base tag and its opening: how far each finger
+has turned out from parallel, in radians, which is minus the right finger's angle.
 
 The base tag is the frame a capture tracks a hand by, the dataset's hand frame.
 The description puts it at the base as a placeholder. It sits ``TAG_OFFSET``
@@ -42,9 +44,9 @@ SLOTS = ("left_gripper", "right_gripper")
 carries its slot as a prefix."""
 
 SHUT = np.radians(-9.1175)
-"""The left finger's angle when the pads meet."""
+"""The opening when the pads meet."""
 OPEN = np.radians(40.0)
-"""The left finger's angle at its open limit."""
+"""The opening at the fingers' open limit."""
 
 GRIPPING = 4
 """The contact dimensionality the description marks a gripping pad with."""
@@ -52,6 +54,8 @@ GRIPPING = 4
 FINGER_HZ = 50.0
 FINGER_RATIO = 1.0
 """How fast the finger servo answers a commanded angle, and how it damps."""
+DRIVEN = "right_finger"
+"""The finger the servo turns. The described gear makes the other follow it."""
 TAG_OFFSET = 0.025
 """How far behind the described base the base tag sits, along the base's x,
 meters: where the fiducial is mounted on the gripper."""
@@ -64,8 +68,8 @@ class Hand:
   """The body a hand is carried by. Its state is the tag ``TAG_OFFSET`` behind it."""
   fingers: tuple[int, int]
   """Where the left and right finger angles sit in ``qpos``."""
-  servos: tuple[int, int]
-  """The left and right finger position servos."""
+  servo: int
+  """The right finger's position servo, the hand's one drive."""
 
 
 def spec(side: int) -> mujoco.MjSpec:
@@ -76,13 +80,12 @@ def spec(side: int) -> mujoco.MjSpec:
     str(specialist_description.get_mjcf_path(VARIANT))
   )
   turn = 2.0 * np.pi * FINGER_HZ
-  for finger in ("left", "right"):
-    servo = described.actuator(f"{finger}_finger")
-    swung = described.joint(f"{finger}_finger").armature
-    servo.biastype = mujoco.mjtBias.mjBIAS_AFFINE
-    servo.gainprm[0] = swung * turn * turn
-    servo.biasprm[1] = -swung * turn * turn
-    servo.biasprm[2] = -2.0 * FINGER_RATIO * swung * turn
+  servo = described.actuator(DRIVEN)
+  swung = described.joint(DRIVEN).armature
+  servo.biastype = mujoco.mjtBias.mjBIAS_AFFINE
+  servo.gainprm[0] = swung * turn * turn
+  servo.biasprm[1] = -swung * turn * turn
+  servo.biasprm[2] = -2.0 * FINGER_RATIO * swung * turn
   for geom in described.geoms:
     if geom.contype == 2:
       geom.contype = 2 << side
@@ -107,14 +110,14 @@ def bind(model: mujoco.MjModel, slot: str) -> Hand:
     slot=slot,
     base=model.body(f"{slot}_base").id,
     fingers=(int(left.qposadr[0]), int(right.qposadr[0])),
-    servos=(int(model.actuator(left.name).id), int(model.actuator(right.name).id)),
+    servo=int(model.actuator(f"{slot}_{DRIVEN}").id),
   )
 
 
 def grip(ctrl: Float64Array, servos: Int64Array, opening: Float64Array) -> None:
-  """Send every hand's finger servos, ``(hands, 2)``, an opening, ``(num_envs,
-  hands)``: the left finger to it and the right mirrored."""
-  ctrl[:, servos] = opening[..., None] * np.array([1.0, -1.0])
+  """Send every hand's servo, ``(hands,)``, an opening, ``(num_envs, hands)``:
+  the right finger opens toward negative angles."""
+  ctrl[:, servos] = -opening
 
 
 def pads(model: mujoco.MjModel, hand: Hand) -> Int64Array:
@@ -162,7 +165,7 @@ def states(
   qpos: Float64Array,
 ) -> Float64Array:
   """Every hand read out of ``qpos``, ``(n, nq)``: its base tag's position and
-  quaternion, then its left finger's angle, ``(n, hands, 8)``."""
+  quaternion, then its opening, ``(n, hands, 8)``: what the servo reads."""
   out = np.empty((len(qpos), len(hands), 8))
   for row, state in enumerate(qpos):
     scratch.qpos[:] = state
@@ -170,7 +173,7 @@ def states(
     for index, hand in enumerate(hands):
       out[row, index, :3] = frame(scratch, hand)[0]
       out[row, index, 3:7] = scratch.xquat[hand.base]
-      out[row, index, 7] = state[hand.fingers[0]]
+      out[row, index, 7] = -state[hand.fingers[1]]
   return out
 
 

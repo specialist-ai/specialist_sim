@@ -43,7 +43,9 @@ observation = rig.step(hold(observation.state[:, -1]))
 ```
 
 A hand is eight numbers: its base tag's room-frame position, a rotation as a
-`wxyz` quaternion, and its left finger's angle in radians. The base tag sits
+`wxyz` quaternion, and its opening in radians: how far each finger has turned
+out from parallel. One servo turns the right finger, and the left follows it
+through a 1:1 gear. The base tag sits
 `gripper.TAG_OFFSET` (25 mm) behind the described base, where the fiducial is
 mounted on the real gripper. Every array has a leading axis over the
 `num_envs` parallel envs the rig holds.
