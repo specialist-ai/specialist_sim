@@ -16,8 +16,8 @@ uv run pytest
 ```
 
 The `handheld` extra adds the Quest page's socket and `sim-record`'s command
-line. The `dataset` extra adds the take replay and PyAV, which films an episode
-or a replay.
+line. The `dataset` extra adds the take replay, `sim-state` and PyAV, which
+films an episode or a replay.
 
 ## The lenses
 
@@ -170,6 +170,20 @@ MUJOCO_GL=egl uv run --extra dataset sim-render ~/recordings/NAME/EPISODE.npz --
 ```
 
 films an episode: an overview of its scene beside each hand's wrist lens.
+
+```bash
+uv run --extra dataset sim-state ~/recordings/NAME/*.npz --output-dir ~/dataset_sim
+```
+
+writes each episode as the state layer specialist's `scripts/state.py` writes
+for a capture, `<output-dir>/state_s<scale>_r<f_row>/<name>.rrd`. An image is
+`--image-size` pixels across, 360 by default, and `scale` is 2880 over it.
+`--hands` picks `left`, `right` or `both`, `right` by default. Each written hand
+takes its rank in left, right order as its slot. Each lens fires at 29.97 Hz:
+`cam00` from time 0, a later slot at an offset drawn from the episode's name.
+`sim-state` traces each frame at the row nearest its shutter, its `capture_row`.
+Each pixel averages `--supersample` by `--supersample` rays, 8 by default, and
+each image is black outside the rig's disc.
 
 ## The LEGO sorting task
 

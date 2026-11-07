@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# A recorded session, read back and replayed into the environment.
+# A recorded session replayed into the environment; an episode written as a state layer.
 dataset = ["specialist-dataset", "av>=13"]
 # The handheld grippers on a Quest: the page's socket and the command line.
 handheld = ["websockets>=13", "tyro>=1.0"]
@@ -22,6 +22,7 @@ handheld = ["websockets>=13", "tyro>=1.0"]
 sim-record = "specialist_sim.scripts.record:main"
 sim-replay = "specialist_sim.scripts.replay:main"
 sim-render = "specialist_sim.scripts.render_video:main"
+sim-state = "specialist_sim.scripts.state:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff==0.15.0", "mypy>=1.13", "pre-commit>=3.8"]
