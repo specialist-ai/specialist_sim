@@ -59,8 +59,8 @@ the lens axes the `Cfg.image_hands` order; everything else is in `HANDS` order.
 
 `Cfg` holds the `clock`, the `embodiment`, the `lenses`, the `image_size`, the
 `supersample`, the `finger` servo's stiffness and damping, the `camera_latency`
-(0.12 s, the sensor's own delay), the `driven` hands and the `image_hands`. A
-hand not driven holds where it was last sent.
+(0.12 s, the sensor's own delay), the `driven` hands, the `image_hands` and
+`autoreset`. A hand not driven holds where it was last sent.
 
 A reset lays each env from its seed, or from a `Start`. A reset and every step
 return the observation and an `info` dict of `(num_envs,)` arrays:
@@ -73,8 +73,11 @@ return the observation and an `info` dict of `(num_envs,)` arrays:
 | `success` | progress has held at 1 for `Task.dwell` seconds, latched |
 | `unstable` | MuJoCo reset the env for want of a finite state, latched |
 | `tracking_error` | the largest gap between a driven hand and its setpoint |
-| `done` | `success`, a label in `Task.fails`, or `unstable`; evaluation owns the time limit |
+| `done` | `success`, `Verdict.failed`, or `unstable`; evaluation owns the time limit |
 | `seed` | the seed of the layout actually laid |
+
+`Cfg.autoreset` opens seed + 1 in an ended env as its next step starts, hands
+where they stand. It is on by default; a reset before that step cancels it.
 
 `env.rows(env_idx)` hands one env's rows of the last step to a recorder,
 `env.trace(qpos)` draws every lens at recorded coordinates, and
@@ -105,12 +108,12 @@ setpoint with six impedance actuators. Another embodiment implements
 ### The task
 
 A `Task` is a frozen dataclass whose fields an episode records. `spec` builds
-its room, `draw` lays an episode from a seed, and `judge` turns the `Objects`
-of every env into a `Verdict`, its progress, labels and counts. The goal holds
-where progress is 1; `Task.dwell` is the seconds it must hold before success
-latches, and `Task.latched` and `Task.fails` say which labels hold once true
-and which end an episode. `Task()` is the lit empty
-room.
+its room, `draw` lays an episode from a seed, and `judge` turns the `Objects` of
+every env into a `Verdict`: its progress, whether it failed, labels and counts.
+The goal holds where progress is 1; `Task.dwell` is the seconds it must hold
+before success latches. `Task.latched` names the labels held once true.
+`Task.fails` names, by object, the geom name prefixes that `Objects.failed`
+reports it touching. `Task()` is the lit empty room.
 
 ## Physics
 
@@ -155,6 +158,9 @@ The left controller starts and the right one ends.
 | Recording: keep the episode, lay a new layout, pause | A |
 | Recording: drop the episode, record a new layout | B |
 
+An episode that ends on its own is kept, less its last `--cut` seconds if it
+failed, and the next layout follows. One without progress is never kept.
+
 The fingers run on `xr.FINGER`, a servo critically damped at 25 Hz for a
 demonstrator's grip.
 
@@ -197,9 +203,11 @@ observation, info = env.reset(range(32))
 
 A desk with a tray, a red and a blue AkroBin 30210, and twelve 2 x 4 bricks.
 A layout, `drop` (the task) or `pile`, puts 1 to 8 bricks on the tray and parks
-the rest in their bins. A brick is sorted in its color's bin, missorted in the
-other, or lost below the desk. `info["counts"]` holds `started`, `sorted`,
-`missorted`, `on_tray` and `lost`; success is every started brick sorted.
+the rest in their bins. A brick is sorted once it rests in its color's bin, let
+go of, missorted in the other, or lost below the desk. `info["counts"]` holds `started`, `sorted`,
+`missorted`, `on_tray` and `lost`; success is every started brick sorted. A
+missorted brick ends the episode, as does one touching the desk top, the floor
+or the other color's bin.
 
 ## The pick-and-place task
 
@@ -213,8 +221,8 @@ env.reset([0], start=Start(hands, cube))   # hands (2, 8); cube (1, 7)
 ```
 
 A cube starts off a tape target on the desk and is won when it rests on the
-tape, let go of, for half a second. `info["labels"]` carries `picked`, latched,
-and `dropped`, which ends the episode.
+tape, let go of, for half a second. It is lost once it falls off the desk.
+`info["labels"]` carries `picked`, latched.
 
 ## Replaying a recorded take
 

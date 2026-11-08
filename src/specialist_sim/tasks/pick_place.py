@@ -36,7 +36,6 @@ class PickPlace(Task):
 
   dwell: ClassVar[float] = 0.5
   latched: ClassVar[tuple[str, ...]] = ("picked",)
-  fails: ClassVar[tuple[str, ...]] = ("dropped",)
   focus: ClassVar[Float64Array] = np.array([0.0, 0.0, desk.TOP])
 
   def spec(self) -> mujoco.MjSpec:
@@ -102,8 +101,6 @@ class PickPlace(Task):
     placed = on_tape & resting & ~held
     return Verdict(
       progress=placed.astype(np.float64),
-      labels={
-        "dropped": desk.fallen(position[:, 2]),
-        "picked": held & (position[:, 2] > REST + 0.010),
-      },
+      failed=desk.fallen(position[:, 2]),
+      labels={"picked": held & (position[:, 2] > REST + 0.010)},
     )

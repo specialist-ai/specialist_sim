@@ -17,8 +17,10 @@ The left controller starts and the right one ends:
     A          recording: keep the episode, lay a new layout, and pause
     B          recording: drop the episode and record a new layout
 
-A new layout keeps the grippers where they stand, and one that would put an
-object in a gripper is passed over. Every row of an episode is recorded.
+An episode that ends on its own is kept, less its last ``cut`` seconds if it
+failed, and recording goes on in the next layout. An episode without progress is
+never kept. A new layout keeps the grippers where they stand, and one that would
+put an object in a gripper is passed over.
 """
 
 import time
@@ -46,7 +48,7 @@ Recorded = (
 
 NOTICE = 2.0
 RED, GREY = "rgba(190, 25, 20, 0.88)", "rgba(30, 30, 30, 0.8)"
-GREEN = "rgba(25, 135, 60, 0.9)"
+GREEN, AMBER = "rgba(25, 135, 60, 0.9)", "rgba(200, 120, 0, 0.9)"
 
 
 def main() -> None:
@@ -63,6 +65,7 @@ def record(
   port: int = 8012,
   cert: Path | None = None,
   key: Path | None = None,
+  cut: float = 1.0,
 ) -> None:
   """Record episodes of ``task`` into ``out``.
 
@@ -72,11 +75,11 @@ def record(
     port: The port the headset opens.
     cert: A TLS certificate, to serve over Wi-Fi.
     key: Its private key.
+    cut: Seconds a failed episode loses from its end.
   """
   env = Env(task, Cfg(clock=ROWWISE, finger=xr.FINGER, image_hands=()))
   focus = env.task.focus
-  seed = int(time.time())
-  observation, info = env.reset([seed])
+  observation, info = env.reset([int(time.time())])
   page = Page(
     env.model, env.sim.geom_xpos[0], env.sim.geom_xmat[0], focus, port, cert, key
   )
@@ -91,7 +94,7 @@ def record(
   sent = observation.state[0, -1].copy()
   taken: list[Rows] | None = None
   name = ""
-  meta = {}
+  meta = env.describe()
   kept, total = 0, 0.0
   period = ROWWISE.row_dt
   notice = ("", GREY, 0.0)
@@ -100,17 +103,18 @@ def record(
     nonlocal notice
     notice = (headline, color, time.perf_counter() + NOTICE)
 
-  def new_layout() -> None:
-    """A new layout under the hands as they stand."""
-    nonlocal seed, info
-    _, info = env.reset([seed + 1], start=Start(env.rows(0).state[-1]))
-    seed = int(info["seed"][0])
-
-  def start() -> None:
-    nonlocal taken, name, meta
-    taken = [env.rows(0)]
-    name = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-    meta = env.describe()
+  def save(rows: list[Rows], headline: str, color: str) -> None:
+    """Save ``rows`` as episode ``name`` unless empty or without progress."""
+    nonlocal kept, total
+    if rows and info["progress"][0] > 0:
+      counts = {key: int(value[0]) for key, value in info["counts"].items()}
+      episode.save(out, Episode(name, episode.joined(rows), {**meta, "score": counts}))
+      kept += 1
+      total += len(rows) * period
+      notify(f"{headline} #{kept}", color)
+      print(f"kept {name}, progress {info['progress'][0]:.2f}")
+    elif rows:
+      notify("Not kept", GREY)
 
   due = time.perf_counter()
   while True:
@@ -122,21 +126,14 @@ def record(
       anchor, centered = xr.facing(inputs.head, focus), True
     for command in poll.commands:
       if command == "record" and taken is None:
-        start()
-      elif command == "keep" and taken is not None:
-        counts = {key: int(value[0]) for key, value in info["counts"].items()}
-        rows = episode.joined(taken)
-        path = episode.save(out, Episode(name, rows, {**meta, "score": counts}))
-        kept += 1
-        total += len(taken) * period
-        taken = None
-        notify(f"Kept #{kept}", GREEN)
-        print(f"kept {path.stem}, progress {info['progress'][0]:.2f}")
-        new_layout()
-      elif command == "drop" and taken is not None:
-        notify("Dropped", GREY)
-        new_layout()
-        start()
+        taken = []
+      elif command in ("keep", "drop") and taken is not None:
+        if command == "keep":
+          save(taken, "Kept", GREEN)
+        elif taken:
+          notify("Dropped", GREY)
+        taken = None if command == "keep" else []
+        _, info = env.reset([info["seed"][0] + 1], start=Start(env.rows(0).state[-1]))
       elif command == "recenter" and inputs is not None:
         anchor = xr.facing(inputs.head, focus)
 
@@ -149,7 +146,15 @@ def record(
           sent[index] = xr.target(placed, inputs.hands[hand].trigger)
     _, info = env.step(sent[None, None])
     if taken is not None:
+      if not taken:
+        name = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
       taken.append(env.rows(0))
+      if info["done"][0]:
+        if info["success"][0]:
+          save(taken, "Success", GREEN)
+        else:
+          save(taken[: -round(cut / period) or None], "Failed", AMBER)
+        taken = []
 
     headline, color, until = notice
     if time.perf_counter() >= until:

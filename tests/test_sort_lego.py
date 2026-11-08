@@ -80,6 +80,10 @@ def test_a_reset_settles_the_bricks_on_the_tray_and_scores_none_sorted() -> None
     assert info["counts"][key].tolist() == [count] * 2, key
   assert info["counts"]["lost"].tolist() == [0, 0]
   assert not info["success"].any() and not info["done"].any()
+  at = brick_q(env, _active(env))
+  env.sim.qpos[0, at : at + 3] = 0.0, 0.4, desk.TOP + 0.01
+  _, info = env.step()
+  assert info["done"].tolist() == [True, False], "a brick touched the desk"
   assert observation.state[0, -1, 1] == pytest.approx(initial.home(HANDS[1]), abs=1e-3)
 
 
@@ -101,13 +105,17 @@ def test_a_brick_counts_once_by_where_it_landed() -> None:
   poses[0, blue, :3] = [*measures.TRAY_CENTER, desk.TOP - desk.FALLEN - 0.01]
   poses[0, red_off, :3] = [0.0, 0.4, desk.TOP + 0.01]
   n = len(BRICK_COLORS)
-  verdict = SortLego().judge(
-    Objects(poses, np.zeros((1, n, 6)), np.zeros((1, n), bool), laid)
-  )
+  still, apart, ok = np.zeros((1, n, 6)), np.zeros((1, n), bool), np.zeros(1, bool)
+  verdict = SortLego().judge(Objects(poses, still, apart, laid, ok))
   counted = {key: int(value[0]) for key, value in verdict.counts.items()}
   assert counted == {"started": 5, "sorted": 1, "missorted": 1, "on_tray": 1, "lost": 1}
-  assert verdict.labels["missorted"][0] and verdict.labels["lost"][0]
+  assert verdict.failed[0], "a brick is missorted"
   assert verdict.progress[0] == 0.2
+  held, moving = apart.copy(), still.copy()
+  held[0, red], moving[0, red, 3] = True, 0.1
+  for velocity, grip in ((still, held), (moving, apart)):
+    judged = SortLego().judge(Objects(poses, velocity, grip, laid, ok))
+    assert judged.counts["sorted"][0] == 0, "a held or moving brick is not sorted"
 
 
 def test_hands_standing_where_a_brick_would_start_pass_over_that_seed() -> None:
@@ -145,7 +153,7 @@ def test_a_brick_dropped_into_an_akrobin_comes_to_rest_sorted(x: float) -> None:
   """From over the floor, or onto the front ramp, which a brick slides down, ``x``
   along the bin's own x. Every other brick waits on the floor, away from the
   desk, so the bin is empty but for it."""
-  env = Env(SortLego(bricks=1, mode="pile"), BLIND)
+  env = Env(SortLego(bricks=1, mode="pile"), replace(BLIND, autoreset=False))
   env.reset([5])
   brick = _active(env)
   for other in range(len(BRICK_COLORS)):

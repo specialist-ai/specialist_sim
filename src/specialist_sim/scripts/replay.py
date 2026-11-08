@@ -31,7 +31,8 @@ def main() -> None:
   lenses = {
     hand: take.lens(track, size) for hand, track in zip(HANDS, take.tracks, strict=True)
   }
-  env = Env(Task(), Cfg(lenses=lenses, image_size=size, camera_latency=0.0))
+  cfg = Cfg(lenses=lenses, image_size=size, camera_latency=0.0, autoreset=False)
+  env = Env(Task(), cfg)
   env.reset([0], start=Start(take.state(0), np.zeros((0, 7)), np.zeros(len(HANDS))))
   gaps = []
   with video.writer(args.out, size * len(HANDS), 2 * size, 1.0 / take.period) as write:

@@ -22,7 +22,8 @@ from specialist_sim.tasks.sort_lego.measures import (
 @dataclass(frozen=True)
 class SortLego(Task):
   """Sort every brick that starts on the tray into the bin of its color. It is
-  won once they are all there; no label fails it."""
+  won once they all rest there, let go of, and lost once a brick is missorted or
+  touches the desk top, the floor or the other color's bin."""
 
   mode: Literal["drop", "pile"] = "drop"
   """How the tray is laid out."""
@@ -37,7 +38,10 @@ class SortLego(Task):
     fill_diffuse=0.25,
     ambient=0.35,
   )
-  latched: ClassVar[tuple[str, ...]] = ("missorted", "lost")
+  fails: ClassVar[dict[str, tuple[str, ...]]] = {
+    f"brick_{i}": ("desk_top", "room_floor", f"{COLORS[1 - COLORS.index(color)]}_bin")
+    for i, color in enumerate(BRICK_COLORS)
+  }
   focus: ClassVar[Float64Array] = np.array([*TRAY_CENTER, desk.TOP])
 
   @property
@@ -56,17 +60,22 @@ class SortLego(Task):
     own = np.array([COLORS.index(color) for color in BRICK_COLORS])
     active = in_bin(objects.laid[..., :3]) < 0
     landed = in_bin(objects.poses[..., :3])
+    resting = (
+      ~objects.held
+      & (np.linalg.norm(objects.velocity[..., 3:], axis=-1) < 0.02)
+      & (np.linalg.norm(objects.velocity[..., :3], axis=-1) < 0.5)
+    )
     fallen = desk.fallen(objects.poses[..., 2])
     loose = active & (landed < 0)
     counts = {
       "started": active.sum(-1),
-      "sorted": (active & (landed == own)).sum(-1),
+      "sorted": (active & (landed == own) & resting).sum(-1),
       "missorted": (active & (landed >= 0) & (landed != own)).sum(-1),
       "on_tray": (loose & ~fallen & on_tray(objects.poses[..., :3])).sum(-1),
       "lost": (loose & fallen).sum(-1),
     }
     return Verdict(
       progress=counts["sorted"] / counts["started"],
-      labels={"missorted": counts["missorted"] > 0, "lost": counts["lost"] > 0},
+      failed=objects.failed | (counts["missorted"] > 0),
       counts=counts,
     )

@@ -1,6 +1,8 @@
 """The pick-and-place room and task: what stands in it and how an episode is
 judged."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -19,7 +21,7 @@ def _cube(env: Env[PickPlace]) -> Float64Array:
 def test_a_settled_cube_on_the_tape_latches_success_after_the_dwell() -> None:
   """Success latches on the step the cube has rested on the tape for the
   dwell, and holds after it."""
-  env = Env(PickPlace(), SMALL)
+  env = Env(PickPlace(), replace(SMALL, autoreset=False))
   observation, _ = env.reset([0])
   aside = np.array([[0.10, -0.10, pick_place.REST + desk.GAP, 1.0, 0.0, 0.0, 0.0]])
   env.reset([0], start=Start(observation.state[0, -1], aside))
@@ -46,13 +48,18 @@ def test_a_settled_cube_on_the_tape_latches_success_after_the_dwell() -> None:
   )
 
 
-def test_a_cube_off_the_desk_ends_the_episode() -> None:
-  env = Env(PickPlace(), SMALL)
-  env.reset([0])
+def test_a_fallen_cube_ends_the_episode_and_the_next_step_opens_seed_1() -> None:
+  """Env 0 under its hands as they stand; a reset first gives env 1 seed 9."""
+  env = Env(PickPlace(), SMALL, 2)
+  env.reset([0, 0])
   at = env.model.joint("cube").qposadr[0]
-  env.sim.qpos[0, at + 2] = desk.TOP - desk.FALLEN - 0.01
-  _, info = env.step()
-  assert info["labels"]["dropped"][0] and info["done"][0] and not info["success"][0]
+  env.sim.qpos[:, at + 2] = desk.TOP - desk.FALLEN - 0.01
+  before, info = env.step()
+  assert info["done"].all() and not info["success"].any()
+  env.reset([9], [1])
+  after, info = env.step()
+  assert info["seed"].tolist() == [1, 9] and after.row[0, -1] == env.cfg.clock.per_step
+  assert np.allclose(after.state[0, 0, :, :3], before.state[0, -1, :, :3], atol=0.01)
 
 
 def test_a_seed_names_one_start_in_the_region_and_off_the_tape() -> None:

@@ -91,6 +91,7 @@ class Cfg:
   image_hands: tuple[str, ...] = HANDS
   """The hands whose images the observation carries; with none, nothing is
   traced."""
+  autoreset: bool = True
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,8 @@ class Objects:
   """Whether a gripping pad touches each object, ``(num_envs, objects)``."""
   laid: Float64Array
   """Every object's pose as the episode was laid, ``(num_envs, objects, 7)``."""
+  failed: BoolArray
+  """Whether an object touches a geom ``Task.fails`` names, ``(num_envs,)``."""
 
 
 @dataclass(frozen=True)
@@ -153,7 +156,9 @@ class Verdict:
 
   progress: Float64Array
   """From 0 to 1; the goal holds right now where it is 1."""
-  labels: dict[str, BoolArray]
+  failed: BoolArray
+  """Where the task is lost, which ends the episode."""
+  labels: dict[str, BoolArray] = field(default_factory=dict)
   """Whatever else the task tells about each env, by its own names."""
   counts: dict[str, Int64Array] = field(default_factory=dict)
 
@@ -189,8 +194,8 @@ class Task:
   counts it in whole control steps, at least one."""
   latched: ClassVar[tuple[str, ...]] = ()
   """Labels that mean "this happened", which the env holds once they do."""
-  fails: ClassVar[tuple[str, ...]] = ()
-  """Labels that end the episode as a failure."""
+  fails: ClassVar[Mapping[str, tuple[str, ...]]] = {}
+  """By object body, the geom name prefixes ``Objects.failed`` reports it touching."""
   focus: ClassVar[Float64Array] = np.zeros(3)
   """The room point an overview looks at."""
 
@@ -215,7 +220,7 @@ class Task:
     """Where every env stands. A reset judges every env, including ones
     mid-episode, so this reads the objects and advances nothing."""
     num_envs = len(objects.poses)
-    return Verdict(np.zeros(num_envs), {})
+    return Verdict(np.zeros(num_envs), np.zeros(num_envs, np.bool_))
 
 
 class Env[T: Task]:
@@ -254,6 +259,11 @@ class Env[T: Task]:
     self._hand_geom = np.isin(geom_root, roots)
     self._pad = np.zeros(model.ngeom, np.bool_)
     self._pad[[pad for hand in self.hands for pad in hand.pads]] = True
+    # Whether a contact between two geoms counts in Objects.failed.
+    self._ends = np.zeros((model.ngeom, model.ngeom), np.bool_)
+    for body, fails in task.fails.items():
+      ends = [model.geom(g).name.startswith(fails) for g in range(model.ngeom)]
+      self._ends[np.ix_(model.geom_bodyid == model.body(body).id, ends)] = True
     _physics(model)
     self.embodiment = cfg.embodiment(model)
     seen = [self.hands[HANDS.index(hand)] for hand in cfg.image_hands]
@@ -291,6 +301,7 @@ class Env[T: Task]:
     self._dwell = max(1, round(task.dwell / clock.step_dt))
     self._streak = np.zeros(num_envs, np.int64)
     self._success = np.zeros(num_envs, np.bool_)
+    self._done = np.zeros(num_envs, np.bool_)
     self._marks = {name: np.zeros(num_envs, np.bool_) for name in task.latched}
     self._scratch = mujoco.MjData(model)
 
@@ -361,7 +372,10 @@ class Env[T: Task]:
   ) -> tuple[Observation, dict[str, Any]]:
     """Track the leading actions of every env's action chunk, ``(num_envs,
     chunk_size, driven, 8)``, and judge where that leaves each env. With no
-    action every hand holds where it was last sent."""
+    action every hand holds where it was last sent. Under ``Cfg.autoreset``,
+    an env whose episode ended first opens seed + 1 under its standing hands."""
+    if ended := np.flatnonzero(self._done & self.cfg.autoreset).tolist():
+      self.reset([*self._seed[ended] + 1], ended, Start(self._state_rows[ended, -1]))
     clock = self.cfg.clock
     full = hold(self._last, clock.n_action_steps)
     if action is not None:
@@ -389,12 +403,14 @@ class Env[T: Task]:
 
   def objects(self) -> Objects:
     held = np.zeros((self.num_envs, len(self._object_bodies)), np.bool_)
+    failed = np.zeros(self.num_envs, np.bool_)
     for env in np.flatnonzero(self.sim.ncon).tolist():
       one, other = self.sim.get_data(env, self._scratch).contact.geom.T
       touched = np.concatenate(
         [self._object_of[other][self._pad[one]], self._object_of[one][self._pad[other]]]
       )
       held[env, touched[touched >= 0]] = True
+      failed[env] = self._ends[one, other].any() | self._ends[other, one].any()
     return Objects(
       poses=np.concatenate(
         [self.sim.xpos[:, self._object_bodies], self.sim.xquat[:, self._object_bodies]],
@@ -403,6 +419,7 @@ class Env[T: Task]:
       velocity=self.sim.cvel[:, self._object_bodies].copy(),
       held=held,
       laid=self._laid.copy(),
+      failed=failed,
     )
 
   def rows(self, env_idx: int) -> Rows:
@@ -526,9 +543,7 @@ class Env[T: Task]:
     for name, mark in self._marks.items():
       mark |= labels[name]
       labels[name] = mark.copy()
-    failed = np.zeros(self.num_envs, np.bool_)
-    for name in self.task.fails:
-      failed |= labels[name]
+    self._done = self._success | verdict.failed | self._unstable
     return {
       "labels": labels,
       "counts": dict(verdict.counts),
@@ -536,7 +551,7 @@ class Env[T: Task]:
       "success": self._success.copy(),
       "unstable": self._unstable.copy(),
       "tracking_error": self._tracking.copy(),
-      "done": self._success | failed | self._unstable,
+      "done": self._done.copy(),
       "seed": self._seed.copy(),
     }
 
