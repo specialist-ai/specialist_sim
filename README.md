@@ -2,7 +2,8 @@
 
 A simulated capture rig for collecting demonstrations and evaluating
 manipulation policies: grippers on their embodiment, in whatever room a task
-gives them. Two tasks come with it, LEGO sorting and pick-and-place, and
+gives them. Three tasks come with it, LEGO sorting, LEGO disassembly and
+sorting, and pick-and-place, and
 demonstrations are recorded with a Quest.
 
 ## Setup
@@ -113,12 +114,37 @@ every env into a `Verdict`: its progress, whether it failed, labels and counts.
 The goal holds where progress is 1; `Task.dwell` is the seconds it must hold
 before success latches. `Task.latched` names the labels held once true.
 `Task.fails` names, by object, the geom name prefixes that `Objects.failed`
-reports it touching. `Task()` is the lit empty room.
+reports it touching. `Task.bonds` names the holds between objects that the env
+engages and gives up, and `Objects.bonded` says which still hold. `Task()` is
+the lit empty room.
+
+### Bonds
+
+A `Bond` holds one object, the part, on another, the base, as a weld. A reset
+engages it wherever the part is laid at `Bond.pose` in the base's frame, within
+`ENGAGED`. The part bears on a face, a rectangle `Bond.face` about
+`Bond.anchor` square to the base's z, which takes any push; spread holds take
+the pull. After every row the env reads everything the base puts on the part,
+through the weld and wherever the two touch, as a pull `N` off the base and a
+moment `M` about the anchor, and gives the bond up for good once
+
+    N + max(|M_y| / face_x, |M_x| / face_y) >= pull
+
+that is, once its holds would take the pull together, the part pulled straight
+off or pried up about an edge of the face. Each episode draws every bond's pull
+uniformly between the two of `Bond.pull`, from a stream of its seed's own, and
+`env.pulls` holds them, `(num_envs, bonds)`. A push inside the face never
+parts a bond, nor does any shear or twist, and a bond holds while what was laid
+settles. Reading the load costs an env about 0.09 ms a row while one of its
+bonds holds, as it copies the env's `MjData` and solves its constraints again:
+32 envs of the LEGO room step a row in 4.8 ms with three pairs each, 2.0 ms
+without.
 
 ## Physics
 
 One set of solver and contact settings applies to every room: `IMPRATIO`,
-`SOLREF` and `SOLIMP`, in `env.py`.
+`SOLREF` and `SOLIMP`, in `env.py`, and `BOND_SOLIMP` for a bond's weld, which
+stretches 0.003 mm a newton.
 `tests/test_physics_settings.py` holds them to what they are for.
 
 ## Evaluation
@@ -135,6 +161,7 @@ source. A rollout is deterministic: the same seeds give the same outcomes.
 
 ```bash
 uv run --extra handheld sim-record sort-lego --out ~/recordings/NAME
+uv run --extra handheld sim-record disassemble-sort-lego --out ~/recordings/NAME
 uv run --extra handheld sim-record pick-place --out ~/recordings/NAME
 ```
 
@@ -208,6 +235,38 @@ go of, missorted in the other, or lost below the desk. `info["counts"]` holds `s
 `missorted`, `on_tray` and `lost`; success is every started brick sorted. A
 missorted brick ends the episode, as does one touching the desk top, the floor
 or the other color's bin.
+
+Every LEGO task builds its bricks with `scene.brick`. A brick has the mass and
+inertia of its box, studs included, and collides as two boxes: its body below
+the studs, and a slab around its studs that meets everything but another
+brick's body. So a brick sits down onto another's studs as onto its hollow
+underside, 9.525 mm above it, and stands on its studs on anything else.
+
+## The LEGO disassembly and sorting task
+
+```python
+from specialist_sim.env import Env
+from specialist_sim.tasks.disassemble_sort_lego import DisassembleSortLego
+
+env = Env(DisassembleSortLego(pairs=1), num_envs=8)
+observation, info = env.reset(range(8))
+```
+
+The LEGO sorting room, with 1 to 3 pairs dropped onto the tray, each a red and
+a blue brick clutched two studs apart as a stair, either color on top, turned at
+random. Each clutch is a `Bond` with a 2 x 2 stud face whose pull each episode
+draws between 30 and 40 N, `PULL`. A brick lifted by its middle pries its pair
+apart at about half its pull. Both hands are driven by default; one grasp pulls
+a pair apart and keeps its brick at twice the strongest pull. A pair squeezed
+between two opposed pushes of over 20 N across its face's edge can spin apart,
+as a pencil squeezed end to end does, and so can a pair sheared and twisted at
+once by about 40 N with nothing else holding it.
+
+`info["counts"]` holds `pairs` and `apart` beside the sorting counts, and
+`info["labels"]["apart"]` says every pair has come apart. A brick still
+clutched is never sorted. Progress is pairs apart and bricks sorted over pairs
+and bricks; success is every brick sorted, and the episode is lost as sorting's
+is.
 
 ## The pick-and-place task
 

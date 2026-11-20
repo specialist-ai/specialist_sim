@@ -23,9 +23,15 @@ TRAY_LIP = 0.015
 # The rim's inner wall's slope from the horizontal.
 TRAY_WALL_ANGLE = np.pi / 4
 
-# A 2 x 4 brick's collision box: long, wide, and tall to the studs' tops.
-BRICK = (0.03175, 0.015875, 0.009525 + 0.00185)
+# A brick's studs: their pitch, their radius, and how far they rise over its body.
+STUD_PITCH = 0.008
+STUD_RADIUS = 0.0049 / 2
+STUD_RISE = 0.00185
+# A 2 x 4 brick's box: long, wide, and tall to the studs' tops.
+BRICK = (0.03175, 0.015875, 0.009525 + STUD_RISE)
 BRICK_MASS = 0.0023
+# How far a brick's middle stands over the middle of one it is pressed onto.
+NESTED = BRICK[2] - STUD_RISE
 
 # The x of the desk's far edge.
 DESK_EDGE = desk.SIZE[0] / 2

@@ -2,6 +2,7 @@
 headset's browser shows the scene.
 
   uv run --extra handheld sim-record sort-lego --out ~/recordings/NAME
+  uv run --extra handheld sim-record disassemble-sort-lego --out ~/recordings/NAME
   uv run --extra handheld sim-record pick-place --out ~/recordings/NAME
 
 Each task's fields are its flags, ``sim-record sort-lego --mode pile``.
@@ -38,11 +39,13 @@ from specialist_sim.gripper import HANDS
 from specialist_sim.handheld import server, xr
 from specialist_sim.handheld.server import Page
 from specialist_sim.handheld.xr import Inputs
+from specialist_sim.tasks.disassemble_sort_lego import DisassembleSortLego
 from specialist_sim.tasks.pick_place import PickPlace
 from specialist_sim.tasks.sort_lego import SortLego
 
 Recorded = (
   Annotated[SortLego, tyro.conf.subcommand("sort-lego")]
+  | Annotated[DisassembleSortLego, tyro.conf.subcommand("disassemble-sort-lego")]
   | Annotated[PickPlace, tyro.conf.subcommand("pick-place")]
 )
 

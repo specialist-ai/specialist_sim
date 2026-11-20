@@ -99,7 +99,7 @@ class Mode(NamedTuple):
 MODES = {"drop": Mode(_drop, 1.0), "pile": Mode(_pile, 0.6)}
 
 
-def _waiting() -> Float64Array:
+def waiting() -> Float64Array:
   """A spot on its own bin's floor for every brick, lying flat, ``(k, 7)``."""
   out = np.zeros((len(BRICK_COLORS), 7))
   for index, color in enumerate(BRICK_COLORS):
@@ -114,6 +114,6 @@ def draw(mode: str, rng: np.random.Generator, bricks: int | None) -> Float64Arra
   count = int(rng.integers(1, 8 + 1)) if bricks is None else bricks
   active = np.zeros(len(BRICK_COLORS), np.bool_)
   active[rng.choice(len(BRICK_COLORS), count, replace=False)] = True
-  poses = _waiting()
+  poses = waiting()
   poses[active, :2], poses[active, 2], poses[active, 3:] = MODES[mode].place(rng, count)
   return poses

@@ -15,6 +15,12 @@ from specialist_sim.tasks.sort_lego import measures
 BRICK_RGB = {"red": (0.74, 0.11, 0.09), "blue": (0.03, 0.33, 0.75)}
 BIN_RGB = {"red": (0.74, 0.16, 0.17), "blue": (0.06, 0.19, 0.75)}
 BRICK_FRICTION = (0.8, 0.005, 0.0001)
+# A brick collides as its body, below the studs, and a slab around its studs.
+# The slab meets everything but another brick's body, so a brick sits down onto
+# another's studs as onto its hollow underside, and rests on its own studs. The
+# room and the pads collide on bit 1 and the fingers on bits 2 and 4.
+BODY_BITS = (8, 1 | 2 | 4 | 8)
+STUD_BITS = (16, 1 | 2 | 4 | 16)
 # The tray's and the bins' plastic; MuJoCo takes the larger friction of two geoms.
 TRAY_FRICTION = (0.5, 0.005, 0.0001)
 # Half the thickness of the tray's boxes and the bins' floors and ramps.
@@ -216,13 +222,15 @@ def brick(
   spec: mujoco.MjSpec, name: str, color: str, at: tuple[float, float, float]
 ) -> None:
   """Add one brick on a free joint, flat with its long side along x, its origin
-  and mass at the middle of its collision box, studs included. ``at`` is where
-  it stands in the reference pose, where the solver sizes its contact buffers."""
+  and mass at the middle of its box, studs included, and its inertia that box's
+  when solid. It collides as ``BODY_BITS`` and ``STUD_BITS`` say. ``at`` is
+  where it stands in the reference pose, where the solver sizes its contact
+  buffers."""
   length, width, height = measures.BRICK
-  rise = 0.00185
+  rise = measures.STUD_RISE
   body_height = height - rise
-  stud = 0.0049 / 2
-  pitch = 0.008
+  stud = measures.STUD_RADIUS
+  pitch = measures.STUD_PITCH
   wall = 0.0012
   ceiling = 0.001
   sides = 12
@@ -283,6 +291,13 @@ def brick(
   mesh.inertia = mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL
   body = spec.worldbody.add_body(name=name, pos=list(at))
   body.add_joint(name=f"{name}_joint", type=mujoco.mjtJoint.mjJNT_FREE)
+  half = np.array([length, width, height]) / 2.0
+  # Each field set, or the compiler takes ipos from where the body stands.
+  body.explicitinertial = True
+  body.mass = measures.BRICK_MASS
+  body.ipos = [0.0, 0.0, 0.0]
+  body.iquat = [1.0, 0.0, 0.0, 0.0]
+  body.inertia = measures.BRICK_MASS / 3.0 * (half @ half - half * half)
   body.add_geom(
     name=f"{name}_visual",
     type=mujoco.mjtGeom.mjGEOM_MESH,
@@ -293,14 +308,26 @@ def brick(
     density=0,
     group=DRAWN,
   )
-  body.add_geom(
-    name=f"{name}_collision",
-    type=mujoco.mjtGeom.mjGEOM_BOX,
-    size=(length / 2.0, width / 2.0, height / 2.0),
-    mass=measures.BRICK_MASS,
-    group=3,
-    friction=list(BRICK_FRICTION),
-  )
+  for part, center, size, (contype, conaffinity) in (
+    ("body", -rise / 2.0, (length / 2.0, width / 2.0, body_height / 2.0), BODY_BITS),
+    (
+      "studs",
+      top + rise / 2.0,
+      (1.5 * pitch + stud, 0.5 * pitch + stud, rise / 2.0),
+      STUD_BITS,
+    ),
+  ):
+    body.add_geom(
+      name=f"{name}_{part}",
+      type=mujoco.mjtGeom.mjGEOM_BOX,
+      pos=[0.0, 0.0, center],
+      size=size,
+      density=0,
+      group=3,
+      friction=list(BRICK_FRICTION),
+      contype=contype,
+      conaffinity=conaffinity,
+    )
 
 
 def spec() -> mujoco.MjSpec:
