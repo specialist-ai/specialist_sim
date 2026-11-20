@@ -80,10 +80,12 @@ def test_a_reset_settles_the_bricks_on_the_tray_and_scores_none_sorted() -> None
     assert info["counts"][key].tolist() == [count] * 2, key
   assert info["counts"]["lost"].tolist() == [0, 0]
   assert not info["success"].any() and not info["done"].any()
-  at = brick_q(env, _active(env))
+  brick = _active(env)
+  at = brick_q(env, brick)
   env.sim.qpos[0, at : at + 3] = 0.0, 0.4, desk.TOP + 0.01
   _, info = env.step()
   assert info["done"].tolist() == [True, False], "a brick touched the desk"
+  assert env.failing(0) == [(f"brick_{brick}", "desk_top")] and env.failing(1) == []
   assert observation.state[0, -1, 1] == pytest.approx(initial.home(HANDS[1]), abs=1e-3)
 
 

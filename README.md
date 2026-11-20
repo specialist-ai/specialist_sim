@@ -81,7 +81,8 @@ return the observation and an `info` dict of `(num_envs,)` arrays:
 where they stand. It is on by default; a reset before that step cancels it.
 
 `env.rows(env_idx)` hands one env's rows of the last step to a recorder,
-`env.trace(qpos)` draws every lens at recorded coordinates, and
+`env.failing(env_idx)` names the touches `Task.fails` lists that one env stands
+in, `env.trace(qpos)` draws every lens at recorded coordinates, and
 `env.describe()` is the env as JSON, which `env.make(meta, **cfg)` stands again.
 
 ### Time
@@ -186,7 +187,10 @@ The left controller starts and the right one ends.
 | Recording: drop the episode, record a new layout | B |
 
 An episode that ends on its own is kept, less its last `--cut` seconds if it
-failed, and the next layout follows. One without progress is never kept.
+failed, and the next layout follows. One without progress is never kept. The
+loop stalls through a reset, about 60 ms, while the controllers move on, and the
+hands take about as long again to catch up, so no episode keeps the rows within
+`--lead` seconds, 0.1 s, of a reset.
 
 The fingers run on `xr.FINGER`, a servo critically damped at 25 Hz for a
 demonstrator's grip.
@@ -197,6 +201,18 @@ demonstrator's grip.
 stood (`state`), the setpoints they chased (`setpoint`) and `qpos`, and a JSON
 `meta` that `env.make` stands the env again from. No image is
 stored. `episode.joined` puts an episode's steps end to end.
+
+Beside `env.describe()`, a recorded episode's `meta` holds how it ended, as it
+ended, past the rows a failed one loses:
+
+| key | meaning |
+| --- | --- |
+| `score` | the task's counts |
+| `seed` | the seed its layout was laid from |
+| `pulls` | the newtons each of `Task.bonds` gives at, laid or not, `env.pulls` |
+| `ended` | `kept`, `success` or `failed` |
+| `failing` | the touches it failed on, `[body, geom]` each, `env.failing` |
+| `unstable` | whether MuJoCo reset it |
 
 ```bash
 MUJOCO_GL=egl uv run --extra dataset sim-render ~/recordings/NAME/EPISODE.npz --out video.mp4

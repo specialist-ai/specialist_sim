@@ -21,7 +21,12 @@ The left controller starts and the right one ends:
 An episode that ends on its own is kept, less its last ``cut`` seconds if it
 failed, and recording goes on in the next layout. An episode without progress is
 never kept. A new layout keeps the grippers where they stand, and one that would
-put an object in a gripper is passed over.
+put an object in a gripper is passed over. The loop stalls through a reset while
+the controllers move on, so the hands catch up just after: no episode keeps the
+rows within ``lead`` seconds of one.
+
+An episode's meta holds ``Env.describe()`` and how the episode ended, as the
+README's Episodes section lists.
 """
 
 import time
@@ -69,6 +74,7 @@ def record(
   cert: Path | None = None,
   key: Path | None = None,
   cut: float = 1.0,
+  lead: float = 0.1,
 ) -> None:
   """Record episodes of ``task`` into ``out``.
 
@@ -79,6 +85,7 @@ def record(
     cert: A TLS certificate, to serve over Wi-Fi.
     key: Its private key.
     cut: Seconds a failed episode loses from its end.
+    lead: Seconds after a reset whose rows no episode keeps.
   """
   env = Env(task, Cfg(clock=ROWWISE, finger=xr.FINGER, image_hands=()))
   focus = env.task.focus
@@ -106,15 +113,23 @@ def record(
     nonlocal notice
     notice = (headline, color, time.perf_counter() + NOTICE)
 
-  def save(rows: list[Rows], headline: str, color: str) -> None:
-    """Save ``rows`` as episode ``name`` unless empty or without progress."""
+  def save(rows: list[Rows], ended: str) -> None:
+    """Save ``rows`` as episode ``name``, which ``ended`` where the env stands,
+    unless empty or without progress."""
     nonlocal kept, total
     if rows and info["progress"][0] > 0:
-      counts = {key: int(value[0]) for key, value in info["counts"].items()}
-      episode.save(out, Episode(name, episode.joined(rows), {**meta, "score": counts}))
+      account = {
+        "score": {key: int(value[0]) for key, value in info["counts"].items()},
+        "seed": int(info["seed"][0]),
+        "pulls": env.pulls[0].tolist(),
+        "ended": ended,
+        "failing": [list(touch) for touch in env.failing(0)],
+        "unstable": bool(info["unstable"][0]),
+      }
+      episode.save(out, Episode(name, episode.joined(rows), {**meta, **account}))
       kept += 1
       total += len(rows) * period
-      notify(f"{headline} #{kept}", color)
+      notify(f"{ended.capitalize()} #{kept}", AMBER if ended == "failed" else GREEN)
       print(f"kept {name}, progress {info['progress'][0]:.2f}")
     elif rows:
       notify("Not kept", GREY)
@@ -132,7 +147,7 @@ def record(
         taken = []
       elif command in ("keep", "drop") and taken is not None:
         if command == "keep":
-          save(taken, "Kept", GREEN)
+          save(taken, "kept")
         elif taken:
           notify("Dropped", GREY)
         taken = None if command == "keep" else []
@@ -149,14 +164,17 @@ def record(
           sent[index] = xr.target(placed, inputs.hands[hand].trigger)
     _, info = env.step(sent[None, None])
     if taken is not None:
-      if not taken:
-        name = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-      taken.append(env.rows(0))
+      rows = env.rows(0)
+      # Its timestamps count from the env's last reset.
+      if rows.timestamp[-1] > lead:
+        if not taken:
+          name = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        taken.append(rows)
       if info["done"][0]:
         if info["success"][0]:
-          save(taken, "Success", GREEN)
+          save(taken, "success")
         else:
-          save(taken[: -round(cut / period) or None], "Failed", AMBER)
+          save(taken[: -round(cut / period) or None], "failed")
         taken = []
 
     headline, color, until = notice
