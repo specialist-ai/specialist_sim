@@ -80,10 +80,12 @@ def test_a_reset_settles_the_bricks_on_the_tray_and_scores_none_sorted() -> None
     assert info["counts"][key].tolist() == [count] * 2, key
   assert info["counts"]["lost"].tolist() == [0, 0]
   assert not info["success"].any() and not info["done"].any()
-  at = brick_q(env, _active(env))
+  brick = _active(env)
+  at = brick_q(env, brick)
   env.sim.qpos[0, at : at + 3] = 0.0, 0.4, desk.TOP + 0.01
   _, info = env.step()
   assert info["done"].tolist() == [True, False], "a brick touched the desk"
+  assert env.failing(0) == [(f"brick_{brick}", "desk_top")] and env.failing(1) == []
   assert observation.state[0, -1, 1] == pytest.approx(initial.home(HANDS[1]), abs=1e-3)
 
 
@@ -106,7 +108,8 @@ def test_a_brick_counts_once_by_where_it_landed() -> None:
   poses[0, red_off, :3] = [0.0, 0.4, desk.TOP + 0.01]
   n = len(BRICK_COLORS)
   still, apart, ok = np.zeros((1, n, 6)), np.zeros((1, n), bool), np.zeros(1, bool)
-  verdict = SortLego().judge(Objects(poses, still, apart, laid, ok))
+  unbonded = np.zeros((1, 0), bool)
+  verdict = SortLego().judge(Objects(poses, still, apart, laid, ok, unbonded))
   counted = {key: int(value[0]) for key, value in verdict.counts.items()}
   assert counted == {"started": 5, "sorted": 1, "missorted": 1, "on_tray": 1, "lost": 1}
   assert verdict.failed[0], "a brick is missorted"
@@ -114,7 +117,7 @@ def test_a_brick_counts_once_by_where_it_landed() -> None:
   held, moving = apart.copy(), still.copy()
   held[0, red], moving[0, red, 3] = True, 0.1
   for velocity, grip in ((still, held), (moving, apart)):
-    judged = SortLego().judge(Objects(poses, velocity, grip, laid, ok))
+    judged = SortLego().judge(Objects(poses, velocity, grip, laid, ok, unbonded))
     assert judged.counts["sorted"][0] == 0, "a held or moving brick is not sorted"
 
 
@@ -127,6 +130,27 @@ def test_hands_standing_where_a_brick_would_start_pass_over_that_seed() -> None:
   hands[1, 1, :3] = brick[:3] + np.array([0.0, 0.0, 0.01])
   _, info = env.reset([11, 11], start=Start(hands))
   assert info["seed"][0] == 11 and info["seed"][1] > 11
+
+
+def test_a_brick_nests_on_studs_and_stands_on_its_own_studs_elsewhere() -> None:
+  """A brick laid on another's studs sinks onto them as onto its hollow
+  underside. On anything else, the tray or another brick's studs, it stands on
+  its own studs."""
+  poses = initial.waiting()
+  x, y = measures.TRAY_CENTER
+  flat, flipped = [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]
+  over = 0.003
+  poses[0] = [x - 0.06, y, initial.LAID, *flat]
+  poses[1] = [x - 0.06, y, initial.LAID + measures.NESTED + over, *flat]
+  poses[6] = [x, y, initial.LAID + over, *flipped]
+  poses[7] = [x + 0.06, y, initial.LAID, *flat]
+  poses[8] = [x + 0.06, y, initial.LAID + measures.BRICK[2] + over, *flipped]
+  env = Env(SortLego(mode="pile"), BLIND)
+  env.reset([0], start=Start(initial.starts(HANDS), poses))
+  z = env.objects().poses[0, :, 2]
+  assert z[1] - z[0] == pytest.approx(measures.NESTED, abs=2e-4)
+  assert z[6] == pytest.approx(initial.LAID - desk.GAP, abs=2e-4), "on its studs"
+  assert z[8] - z[7] == pytest.approx(measures.BRICK[2], abs=2e-4), "studs on studs"
 
 
 def test_the_akrobin_shell_matches_its_measured_size() -> None:

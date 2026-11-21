@@ -14,7 +14,7 @@ from specialist_sim.arrays import Float64Array, Int32Array, UInt8Array
 from specialist_sim.camera.lens import Lens, Mei
 from specialist_sim.camera.render import Renderer
 from specialist_sim.camera.shutter import CAMERA_HZ
-from specialist_sim.env import Cfg, Clock, Env, Observation, Task, hold
+from specialist_sim.env import ROWWISE, Cfg, Clock, Env, Observation, Task, hold
 from specialist_sim.gripper import DRAWN
 
 # Where the hands rest over the slab.
@@ -28,6 +28,9 @@ HOME = np.array(
 SMALL = Cfg(image_size=32, camera_latency=0.0)
 # The room without lenses: physics and scoring only.
 BLIND = Cfg(image_hands=())
+# No lens, and one commanded pose a row: the plant alone, along a path.
+PLANT = Cfg(clock=ROWWISE, image_hands=())
+ROW_HZ = 1.0 / PLANT.clock.row_dt
 # How many actions a test's chunk holds, more than a step executes.
 CHUNK = 16
 # Rows between one exposure of a lens and its next.

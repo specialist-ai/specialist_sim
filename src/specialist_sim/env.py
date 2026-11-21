@@ -34,6 +34,8 @@ IMPRATIO = 100.0
 # constant squared, d the SOLIMP impedance.
 SOLREF = (0.002, 1.0)
 SOLIMP = (0.95, 0.99, 0.001, 0.5, 2.0)
+BOND_SOLIMP = (0.9999, 0.9999, 0.001, 0.5, 2.0)
+ENGAGED = (1e-4, 1e-3)
 # The warnings MuJoCo raises as it resets an env it cannot carry.
 UNSTABLE = [
   int(mujoco.mjtWarning.mjWARN_BADQPOS),
@@ -41,6 +43,8 @@ UNSTABLE = [
   int(mujoco.mjtWarning.mjWARN_BADQACC),
 ]
 VEL = mujoco.mjtStage.mjSTAGE_VEL
+CONTACT = int(mujoco.mjtConstraint.mjCNSTR_CONTACT_FRICTIONLESS)
+EQUALITY = int(mujoco.mjtConstraint.mjCNSTR_EQUALITY)
 
 
 @dataclass(frozen=True)
@@ -148,6 +152,32 @@ class Objects:
   """Every object's pose as the episode was laid, ``(num_envs, objects, 7)``."""
   failed: BoolArray
   """Whether an object touches a geom ``Task.fails`` names, ``(num_envs,)``."""
+  bonded: BoolArray
+  """Whether each of ``Task.bonds`` still holds, ``(num_envs, bonds)``."""
+
+
+@dataclass(frozen=True)
+class Bond:
+  """A weld that holds one object, the part, on another, the base. A reset
+  activates it where the episode lays the part at ``pose`` in the base's frame.
+  The part rests on a face, a rectangle normal to the base's z axis. The bond
+  breaks for good once its load reaches the episode's pull, so pulling the part
+  straight off or prying it up about an edge of the face breaks it. A push into
+  the face, a shear or a twist never breaks it, and it holds while a reset
+  settles the room."""
+
+  base: str
+  part: str
+  """The objects' body names."""
+  pose: tuple[float, ...]
+  """The part's pose in the base's frame, ``(7,)``."""
+  anchor: tuple[float, float, float]
+  """The face's middle, in the base's frame."""
+  face: tuple[float, float]
+  """The face's half sizes along the base's x and y."""
+  pull: tuple[float, float]
+  """The bounds, in newtons, of the uniform draw each episode makes for the
+  bond's pull, the load at which it breaks."""
 
 
 @dataclass(frozen=True)
@@ -196,6 +226,8 @@ class Task:
   """Labels that mean "this happened", which the env holds once they do."""
   fails: ClassVar[Mapping[str, tuple[str, ...]]] = {}
   """By object body, the geom name prefixes ``Objects.failed`` reports it touching."""
+  bonds: ClassVar[tuple[Bond, ...]] = ()
+  """The bonds between objects, which a reset activates and a load breaks."""
   focus: ClassVar[Float64Array] = np.zeros(3)
   """The room point an overview looks at."""
 
@@ -240,6 +272,8 @@ class Env[T: Task]:
       gripper.attach(
         spec, cfg.embodiment.attach(spec, hand), hand, lenses[hand], cfg.finger
       )
+    for index, bond in enumerate(task.bonds):
+      _weld(spec, f"bond_{index}", bond)
     # The batch copies the model, so a later write to it never reaches the physics.
     model = spec.compile()
     self.model = model
@@ -264,6 +298,20 @@ class Env[T: Task]:
     for body, fails in task.fails.items():
       ends = [model.geom(g).name.startswith(fails) for g in range(model.ngeom)]
       self._ends[np.ix_(model.geom_bodyid == model.body(body).id, ends)] = True
+    bonds = task.bonds
+    self._bond_eq = np.array(
+      [model.equality(f"bond_{k}").id for k in range(len(bonds))], np.int64
+    )
+    self._bond_body = np.array(
+      [[model.body(b.base).id, model.body(b.part).id] for b in bonds], np.int64
+    ).reshape(-1, 2)
+    self._bond_object = of[self._bond_body]
+    self._bond_key = self._pair_key(self._bond_body)
+    self._bond_dof = model.jnt_dofadr[model.body_jntadr[self._bond_body[:, 1]]].tolist()
+    self._bond_pose = np.array([b.pose for b in bonds], np.float64).reshape(-1, 7)
+    self._bond_anchor = np.array([b.anchor for b in bonds], np.float64).reshape(-1, 3)
+    self._bond_face = np.array([b.face for b in bonds], np.float64).reshape(-1, 2)
+    self._bond_pull = np.array([b.pull for b in bonds], np.float64).reshape(-1, 2)
     _physics(model)
     self.embodiment = cfg.embodiment(model)
     seen = [self.hands[HANDS.index(hand)] for hand in cfg.image_hands]
@@ -282,6 +330,8 @@ class Env[T: Task]:
     self.sim = Batch(
       model, num_envs, nthread=min(num_envs, os.cpu_count() or 1), persistent=True
     )
+    self._eq_active = self.sim.bind("eq_active")
+    self._pull = np.zeros((num_envs, len(bonds)))
     rows = clock.per_step
     hands = len(HANDS)
     self._qpos_rows = np.zeros((num_envs, rows, model.nq))
@@ -313,7 +363,8 @@ class Env[T: Task]:
   ) -> tuple[Observation, dict[str, Any]]:
     """Open an episode in every env, or in the named ones, ascending, each
     laid from the seed beside it or where ``start`` says. Hands given without
-    objects pass over each seed whose objects would start in a hand."""
+    objects pass over each seed whose objects would start in a hand. A bond
+    starts active where the reset lays its part at the bond's pose."""
     chosen = list(range(self.num_envs)) if env_ids is None else list(env_ids)
     n = len(chosen)
     self.sim.reset(chosen, stage=mujoco.mjtStage.mjSTAGE_NONE)
@@ -340,6 +391,8 @@ class Env[T: Task]:
             objects = self.task.draw(rng, self.cfg.driven)[1]
       self._lay(env, hands, objects)
       self._laid[env] = objects
+      self._eq_active[env, self._bond_eq] = self._engaged(objects)
+      self._pull[env] = rng.spawn(1)[0].uniform(*self._bond_pull.T)
       self._seed[env] = laid
       if start is not None and start.phases is not None:
         phases[k] = np.broadcast_to(start.phases, phases.shape)[k]
@@ -372,8 +425,9 @@ class Env[T: Task]:
   ) -> tuple[Observation, dict[str, Any]]:
     """Track the leading actions of every env's action chunk, ``(num_envs,
     chunk_size, driven, 8)``, and judge where that leaves each env. With no
-    action every hand holds where it was last sent. Under ``Cfg.autoreset``,
-    an env whose episode ended first opens seed + 1 under its standing hands."""
+    action every hand holds where it was last sent. After every row, the env
+    breaks each bond whose load has reached its pull. Under ``Cfg.autoreset``, an env
+    whose episode ended first opens seed + 1 under its standing hands."""
     if ended := np.flatnonzero(self._done & self.cfg.autoreset).tolist():
       self.reset([*self._seed[ended] + 1], ended, Start(self._state_rows[ended, -1]))
     clock = self.cfg.clock
@@ -384,6 +438,7 @@ class Env[T: Task]:
     for row in range(clock.per_step):
       self._command(setpoint[:, row], twist[:, row])
       self._advance((self._row + row) * clock.per_row)
+      self._break_bonds()
       self._qpos_rows[:, row] = self.sim.qpos
       self._state_rows[:, row] = gripper.states(
         self.hands, self.sim.qpos, self.sim.xpos, self.sim.xquat
@@ -410,7 +465,7 @@ class Env[T: Task]:
         [self._object_of[other][self._pad[one]], self._object_of[one][self._pad[other]]]
       )
       held[env, touched[touched >= 0]] = True
-      failed[env] = self._ends[one, other].any() | self._ends[other, one].any()
+      failed[env] = self._fouls(one, other)[0].size > 0
     return Objects(
       poses=np.concatenate(
         [self.sim.xpos[:, self._object_bodies], self.sim.xquat[:, self._object_bodies]],
@@ -420,6 +475,27 @@ class Env[T: Task]:
       held=held,
       laid=self._laid.copy(),
       failed=failed,
+      bonded=self._bonded(),
+    )
+
+  @property
+  def pulls(self) -> Float64Array:
+    """Each env's bond pulls in newtons, drawn when its episode opened,
+    ``(num_envs, bonds)``."""
+    return self._pull.copy()
+
+  def failing(self, env_idx: int) -> list[tuple[str, str]]:
+    """The contacts in one env after its last step that ``Task.fails`` names.
+    Each appears once, as the object's body name and the touched geom's name."""
+    mine, theirs = self._fouls(
+      *self.sim.get_data(env_idx, self._scratch).contact.geom.T
+    )
+    model = self.model
+    return sorted(
+      {
+        (model.body(model.geom_bodyid[g]).name, model.geom(h).name)
+        for g, h in zip(mine.tolist(), theirs.tolist(), strict=True)
+      }
     )
 
   def rows(self, env_idx: int) -> Rows:
@@ -479,6 +555,89 @@ class Env[T: Task]:
       objects[one] & self._hand_geom[other] | objects[other] & self._hand_geom[one]
     )
     return bool(touching.any())
+
+  def _engaged(self, objects: Float64Array) -> BoolArray:
+    """Whether each bond's part lies at the bond's pose on its base in
+    ``objects``, ``(objects, 7)``."""
+    base = objects[self._bond_object[:, 0]]
+    part = objects[self._bond_object[:, 1]]
+    facing = rotation.conjugate(base[:, 3:])
+    at = rotation.rotate(facing, part[:, :3] - base[:, :3])
+    turned = rotation.multiply(facing, part[:, 3:])
+    off = rotation.log(
+      rotation.multiply(rotation.conjugate(self._bond_pose[:, 3:]), turned)
+    )
+    out: BoolArray = (
+      np.linalg.norm(at - self._bond_pose[:, :3], axis=-1) < ENGAGED[0]
+    ) & (np.linalg.norm(off, axis=-1) < ENGAGED[1])
+    return out
+
+  def _bonded(self) -> BoolArray:
+    """Whether each env's bonds hold, ``(num_envs, bonds)``."""
+    out: BoolArray = self._eq_active[:, self._bond_eq] > 0
+    return out
+
+  def _fouls(self, one: Int64Array, other: Int64Array) -> tuple[Int64Array, Int64Array]:
+    """The contacts between geoms ``one`` and ``other`` that ``Task.fails``
+    names, as the objects' geoms and the geoms they touch."""
+    mine, theirs = np.concatenate([one, other]), np.concatenate([other, one])
+    named = self._ends[mine, theirs]
+    return mine[named], theirs[named]
+
+  def _pair_key(self, bodies: Int64Array) -> Int64Array:
+    """One key for each pair of ``bodies``, ``(..., 2)``, in either order."""
+    ordered = np.sort(bodies, axis=-1)
+    out: Int64Array = ordered[..., 0] * self.model.nbody + ordered[..., 1]
+    return out
+
+  def _break_bonds(self) -> None:
+    """Break every bond whose load has reached its pull after the last row."""
+    envs, bonds = np.nonzero(self._bonded())
+    if len(bonds):
+      broke = self._loads(envs, bonds) >= self._pull[envs, bonds]
+      self._eq_active[envs[broke], self._bond_eq[bonds[broke]]] = 0.0
+
+  def _loads(self, envs: Int64Array, bonds: Int64Array) -> Float64Array:
+    """The load on each bond in ``bonds``, in its env in ``envs``. The load is
+    the force pulling the part off its base plus the pry. The pry is the moment
+    about the anchor divided by the distance to the face's edge that the moment
+    tips the part about. Both sum what the base applies to the part, through the
+    weld and through their contacts."""
+    model = self.model
+    generalized = np.zeros(model.nv)
+    wrench = np.empty((len(bonds), 6))
+    for env in np.unique(envs).tolist():
+      data = self.sim.get_data(env, self._scratch)
+      mujoco.mj_forwardSkip(model, data, VEL, 1)
+      kind, which, efc = data.efc_type, data.efc_id, data.efc_force
+      welded = np.where(kind == EQUALITY, which, -1)
+      touched = np.full(len(kind), -1)
+      touch = kind >= CONTACT
+      touched[touch] = self._pair_key(model.geom_bodyid[data.contact.geom])[
+        which[touch]
+      ]
+      for i in np.flatnonzero(envs == env).tolist():
+        k = bonds[i]
+        rows = (welded == self._bond_eq[k]) | (touched == self._bond_key[k])
+        mujoco.mj_mulJacTVec(model, data, generalized, np.where(rows, efc, 0.0))
+        dof = self._bond_dof[k]
+        wrench[i] = generalized[dof : dof + 6]
+    xpos, xquat = self.sim.xpos, self.sim.xquat
+    base, part = self._bond_body[bonds].T
+    facing = xquat[envs, base]
+    anchor = xpos[envs, base] + rotation.rotate(facing, self._bond_anchor[bonds])
+    torque = rotation.rotate(xquat[envs, part], wrench[:, 3:]) + np.cross(
+      xpos[envs, part] - anchor, wrench[:, :3]
+    )
+    unturn = rotation.conjugate(facing)
+    force = -rotation.rotate(unturn, wrench[:, :3])
+    torque = -rotation.rotate(unturn, torque)
+    face = self._bond_face[bonds]
+    pry = np.maximum(
+      np.abs(torque[:, 1]) / face[:, 0], np.abs(torque[:, 0]) / face[:, 1]
+    )
+    out: Float64Array = force[:, 2] + pry
+    return out
 
   def _settle(self, env_ids: Sequence[int], rows: int) -> None:
     """Run the named envs alone for ``rows`` rows, every hand held where it
@@ -621,6 +780,28 @@ def _named(kind: type) -> str:
 def _resolve(name: str) -> Any:
   module, _, attribute = name.partition(":")
   return getattr(import_module(module), attribute)
+
+
+def _weld(spec: mujoco.MjSpec, name: str, bond: Bond) -> None:
+  """Add ``bond``'s weld to ``spec``, inactive. The weld holds the part at
+  ``bond.pose`` in the base's frame, about the face's anchor."""
+  pose = np.asarray(bond.pose, np.float64)
+  anchor = rotation.compose(
+    rotation.inverse(pose), np.array([*bond.anchor, 1.0, 0.0, 0.0, 0.0])
+  )[:3]
+  weld = spec.add_equality(
+    name=name,
+    type=mujoco.mjtEq.mjEQ_WELD,
+    objtype=mujoco.mjtObj.mjOBJ_BODY,
+    name1=bond.base,
+    name2=bond.part,
+    active=False,
+  )
+  data = np.zeros(mujoco.mjNEQDATA)
+  data[:3], data[3:6], data[6:10], data[10] = anchor, bond.anchor, pose[3:], 1.0
+  weld.data = data
+  weld.solref = SOLREF
+  weld.solimp = BOND_SOLIMP
 
 
 def _physics(model: mujoco.MjModel) -> None:

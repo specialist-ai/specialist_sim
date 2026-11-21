@@ -2,8 +2,8 @@
 
 A simulated capture rig for collecting demonstrations and evaluating
 manipulation policies: grippers on their embodiment, in whatever room a task
-gives them. Two tasks come with it, LEGO sorting and pick-and-place, and
-demonstrations are recorded with a Quest.
+gives them. It comes with three tasks: LEGO sorting, LEGO disassembly and
+sorting, and pick-and-place. Demonstrations are recorded with a Quest.
 
 ## Setup
 
@@ -80,6 +80,7 @@ return the observation and an `info` dict of `(num_envs,)` arrays:
 where they stand. It is on by default; a reset before that step cancels it.
 
 `env.rows(env_idx)` hands one env's rows of the last step to a recorder,
+`env.failing(env_idx)` lists the contacts in one env that `Task.fails` names,
 `env.trace(qpos)` draws every lens at recorded coordinates, and
 `env.describe()` is the env as JSON, which `env.make(meta, **cfg)` stands again.
 
@@ -113,12 +114,45 @@ every env into a `Verdict`: its progress, whether it failed, labels and counts.
 The goal holds where progress is 1; `Task.dwell` is the seconds it must hold
 before success latches. `Task.latched` names the labels held once true.
 `Task.fails` names, by object, the geom name prefixes that `Objects.failed`
-reports it touching. `Task()` is the lit empty room.
+reports it touching. `Task.bonds` lists the bonds between objects, which a
+reset activates and a load breaks, and `Objects.bonded` says which still hold.
+`Task()` is the lit empty room.
+
+### Bonds
+
+A `Bond` is a weld that holds one object, the part, on another, the base. A
+reset activates it where the episode lays the part at `Bond.pose` in the base's
+frame, within the distance and angle in `ENGAGED`. The part rests on a face, a
+rectangle of half sizes `Bond.face` about `Bond.anchor`, normal to the base's z
+axis.
+
+After every row, the env sums what the base applies to the part, through the
+weld and through their contacts. `N` is the force pulling the part off the
+base, and `M` is the moment about the anchor, both in the base's frame. The env
+breaks the bond for good once
+
+    N + max(|M_y| / face_x, |M_x| / face_y) >= pull
+
+The second term divides the moment by the distance to the edge the part would
+tip about, so prying the part up about an edge breaks the bond as a straight
+pull does. A push into the face never breaks a bond, and neither does a shear
+or a twist. The env does not check bonds while a reset settles the room.
+
+Each episode draws every bond's pull from a uniform distribution between the
+two values of `Bond.pull`. The draw uses a separate stream spawned from the
+episode's seed, so bonds leave the layout's other draws unchanged. `env.pulls`
+holds the draws, shaped `(num_envs, bonds)`.
+
+Reading the load copies the env's `MjData` and solves its constraints again.
+It costs about 0.09 ms per env per row while any of the env's bonds holds. A
+row of 32 envs of the LEGO room takes 4.8 ms with three pairs each, and 2.0 ms
+without bonds.
 
 ## Physics
 
 One set of solver and contact settings applies to every room: `IMPRATIO`,
-`SOLREF` and `SOLIMP`, in `env.py`.
+`SOLREF` and `SOLIMP`, in `env.py`. `BOND_SOLIMP` sets a bond's weld, which
+stretches 0.003 mm per newton.
 `tests/test_physics_settings.py` holds them to what they are for.
 
 ## Evaluation
@@ -135,6 +169,7 @@ source. A rollout is deterministic: the same seeds give the same outcomes.
 
 ```bash
 uv run --extra handheld sim-record sort-lego --out ~/recordings/NAME
+uv run --extra handheld sim-record disassemble-sort-lego --out ~/recordings/NAME
 uv run --extra handheld sim-record pick-place --out ~/recordings/NAME
 ```
 
@@ -161,6 +196,11 @@ The left controller starts and the right one ends.
 An episode that ends on its own is kept, less its last `--cut` seconds if it
 failed, and the next layout follows. One without progress is never kept.
 
+A reset blocks the loop for about 60 ms while the operator keeps moving the
+controllers. The hands then take about as long again to reach the controllers'
+new poses. No episode keeps the rows within `--lead` seconds after a reset, 0.1 s
+by default.
+
 The fingers run on `xr.FINGER`, a servo critically damped at 25 Hz for a
 demonstrator's grip.
 
@@ -170,6 +210,19 @@ demonstrator's grip.
 stood (`state`), the setpoints they chased (`setpoint`) and `qpos`, and a JSON
 `meta` that `env.make` stands the env again from. No image is
 stored. `episode.joined` puts an episode's steps end to end.
+
+A recorded episode's `meta` holds `env.describe()` and the keys below. They
+describe the env at the episode's last row, even when a failed episode drops its
+last `--cut` seconds.
+
+| key | meaning |
+| --- | --- |
+| `score` | the task's counts |
+| `seed` | the seed the layout was drawn from |
+| `pulls` | every bond's pull in newtons, from `env.pulls`, active or not |
+| `ended` | `kept`, `success` or `failed` |
+| `failing` | the contacts the episode failed on, each `[body, geom]`, from `env.failing` |
+| `unstable` | whether MuJoCo reset the env |
 
 ```bash
 MUJOCO_GL=egl uv run --extra dataset sim-render ~/recordings/NAME/EPISODE.npz --out video.mp4
@@ -208,6 +261,44 @@ go of, missorted in the other, or lost below the desk. `info["counts"]` holds `s
 `missorted`, `on_tray` and `lost`; success is every started brick sorted. A
 missorted brick ends the episode, as does one touching the desk top, the floor
 or the other color's bin.
+
+Every LEGO task builds its bricks with `scene.brick`. A brick has the mass and
+inertia of its box, studs included. It collides as two boxes: its body below
+the studs, and a slab around its studs. The slab collides with everything
+except another brick's body, so a brick laid on another's studs sinks onto them
+as onto its hollow underside, 9.525 mm above the lower brick. On anything else,
+a brick stands on its studs.
+
+## The LEGO disassembly and sorting task
+
+```python
+from specialist_sim.env import Env
+from specialist_sim.tasks.disassemble_sort_lego import DisassembleSortLego
+
+env = Env(DisassembleSortLego(pairs=1), num_envs=8)
+observation, info = env.reset(range(8))
+```
+
+The task uses the LEGO sorting room. A reset drops 1 to 3 pairs onto the tray,
+each turned at random. A pair is a red and a blue brick, either color on top,
+with the top brick clutched two studs along the lower one like a stair. Each
+pair's clutch is a `Bond` with a 2 x 2 stud face, and each episode draws its
+pull between 30 and 40 N, the bounds in `PULL`.
+
+Lifting the top brick by its middle breaks the bond at about half its pull. The
+middle sits one stud off the face's middle, so the lift also pries. Both hands
+are driven by default. One grasp pulls a pair apart and keeps its brick, even at
+twice the strongest pull.
+
+A free pair buckles apart when opposed pushes over about 20 N squeeze it across
+its face's edge. A free pair also comes apart when a shear and a twist of about
+40 N act on it at once.
+
+`info["counts"]` adds `pairs` and `apart` to the sorting counts, and
+`info["labels"]["apart"]` is true once every pair is apart. A brick still
+clutched to its pair never counts as sorted. Progress is pairs apart plus bricks
+sorted, over pairs plus bricks. The episode succeeds once every brick is sorted,
+and fails as a sorting episode fails.
 
 ## The pick-and-place task
 
