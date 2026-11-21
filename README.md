@@ -191,7 +191,7 @@ The left controller starts and the right one ends.
 | Paused: record | X |
 | Recenter the scene in front of the head | Y |
 | Recording: keep the episode, lay a new layout, pause | A |
-| Recording: drop the episode, record a new layout | B |
+| Drop any episode, lay the layout again from its start, pause | B |
 
 An episode that ends on its own is kept, less its last `--cut` seconds if it
 failed, and the next layout follows. One without progress is never kept.

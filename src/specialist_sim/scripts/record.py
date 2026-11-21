@@ -16,15 +16,17 @@ The left controller starts and the right one ends:
     X          paused: record
     Y          stand the scene in front of you again
     A          recording: keep the episode, lay a new layout, and pause
-    B          recording: drop the episode and record a new layout
+    B          drop any episode, lay this layout again from its start, and pause
 
 An episode that ends on its own is kept, less its last ``cut`` seconds if it
 failed, and recording goes on in the next layout. An episode without progress is
-never kept. A new layout keeps the grippers where they stand, and one that would
-put an object in a gripper is passed over. A reset blocks the loop while the
-operator keeps moving the controllers, so the hands jump to the controllers' new
-poses in the first rows after it. No episode keeps the rows within ``lead``
-seconds after a reset.
+never kept. A reset keeps the grippers where they stand. A new layout that would
+put an object in a gripper is passed over. B lays its layout again regardless,
+and the room's settle pushes a gripper up out of any brick it overlaps.
+
+A reset blocks the loop while the operator keeps moving the controllers, so the
+hands jump to the controllers' new poses in the first rows after it. No episode
+keeps the rows within ``lead`` seconds after a reset.
 
 An episode's meta holds ``Env.describe()`` and how the episode ended. The
 README's Episodes section lists its keys.
@@ -145,15 +147,18 @@ def record(
     if inputs is not None and not centered:
       anchor, centered = xr.facing(inputs.head, focus), True
     for command in poll.commands:
+      standing = env.rows(0).state[-1]
       if command == "record" and taken is None:
         taken = []
-      elif command in ("keep", "drop") and taken is not None:
-        if command == "keep":
-          save(taken, "kept")
-        elif taken:
-          notify("Dropped", GREY)
-        taken = None if command == "keep" else []
-        _, info = env.reset([info["seed"][0] + 1], start=Start(env.rows(0).state[-1]))
+      elif command == "keep" and taken is not None:
+        save(taken, "kept")
+        taken = None
+        _, info = env.reset([info["seed"][0] + 1], start=Start(standing))
+      elif command == "drop":
+        notify("Dropped" if taken else "Reset", GREY)
+        taken = None
+        laid = env.objects().laid[0]
+        _, info = env.reset([info["seed"][0]], start=Start(standing, laid))
       elif command == "recenter" and inputs is not None:
         anchor = xr.facing(inputs.head, focus)
 
@@ -183,12 +188,13 @@ def record(
       headline, color = "Paused", GREY
       if taken is not None:
         headline, color = f"REC {len(taken) * period:5.1f} s", RED
+    buttons = "X record · Y recenter · B reset" if taken is None else "A keep · B drop"
     status = {
       "headline": headline,
       "color": color,
       "detail": f"{kept} kept · {total / 60:.1f} min",
       "progress": float(info["progress"][0]),
-      "buttons": "X record · Y recenter" if taken is None else "A keep · B drop",
+      "buttons": buttons,
       "ended": until,
     }
     page.show(env.sim.geom_xpos[0], env.sim.geom_xmat[0], anchor, status)
